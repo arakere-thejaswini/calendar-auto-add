@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Cue</title>
+    <link rel="icon" type="image/png" href="/daisy.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div id="toastRoot" class="toast-container" aria-live="polite"></div>
+
+    <div class="app">
+      <header class="header">
+        <span class="logo"><button id="daisyBtn" class="daisy-btn" type="button" aria-label="Home"><img src="/daisy.png" alt="" class="logo-icon" /></button><span class="logo-label" translate="no">Cue</span></span>
+        <div class="header-actions">
+          <span id="sessionBar" class="session-bar hidden" role="status" aria-live="polite"></span>
+          <button type="button" id="openCueAuthBtn" class="btn btn-outline btn-sm" aria-haspopup="dialog">Sign in</button>
+          <button type="button" id="signOutBtn" class="btn-ghost btn-sm hidden" aria-label="Sign out">Sign out</button>
+          <select id="calendarNameInput" class="select select-calendar hidden" aria-label="Where to save new events" title="Choose Apple, Google, or Cue-only storage"></select>
+        </div>
+      </header>
+
+      <div id="appHero" class="app-hero" aria-labelledby="appHeroTitle">
+        <p class="app-hero-kicker">Calendar capture</p>
+        <h1 id="appHeroTitle" class="app-hero-title">
+          Snap a flyer, paste a line, or scan your inbox—<em class="app-hero-accent">into your calendar.</em>
+        </h1>
+        <p class="app-hero-sub">
+          <strong>Sign in</strong> in the header to use the app. For Gmail or Google Calendar, open <strong>Inbox</strong> and connect Google.
+        </p>
+      </div>
+
+      <p class="pwa-hint muted" aria-hidden="true">
+        Tip: on your phone, use <strong>Add to Home Screen</strong> in the browser menu for quicker access to Cue.
+      </p>
+
+      <nav class="tabs" role="tablist" aria-label="Sections">
+        <button class="tab active" data-tab="quick" id="tabBtnQuick" role="tab" aria-selected="true" aria-controls="panelQuick">Quick</button>
+        <button class="tab" data-tab="gmail" id="tabBtnGmail" role="tab" aria-selected="false" aria-controls="panelGmail">Inbox</button>
+        <button class="tab" data-tab="activity" id="tabBtnActivity" role="tab" aria-selected="false" aria-controls="panelActivity">Activity</button>
+      </nav>
+
+      <main>
+        <!-- ─── Add ─── -->
+        <div id="panelQuick" class="panel panel-stack" role="tabpanel" aria-labelledby="tabBtnQuick">
+          <div id="quickLockedOverlay" class="panel-locked-overlay hidden" aria-hidden="true">
+            <div class="panel-locked-inner">
+              <p class="panel-locked-title">Sign in to continue</p>
+              <button type="button" id="quickLockedSignInBtn" class="btn btn-sm">Sign in</button>
+            </div>
+          </div>
+          <section class="section">
+            <textarea id="textInput" rows="2" placeholder="e.g. Dinner with Sam Friday 7pm"></textarea>
+            <div class="actions">
+              <button id="parseTextBtn" class="btn">Add</button>
+            </div>
+          </section>
+
+          <div class="or-line"><span>or</span></div>
+
+          <section class="section" id="photoCard">
+            <div id="photoDropzone" class="dropzone" tabindex="0" role="button" aria-label="Upload a flyer, invite, or screenshot">
+              <span class="dropzone-line dropzone-line--wide">Snap a flyer, invite, or screenshot</span>
+              <span class="dropzone-line dropzone-line--narrow">Snap a flyer, invite, or screenshot</span>
+            </div>
+            <input id="imageInput" type="file" accept="image/*" hidden />
+          </section>
+
+          <hr class="divider" />
+
+          <section class="section">
+            <label for="quickUpdateInput" class="section-title">Add a note to an event</label>
+            <p class="section-hint muted">Describe what to add; we match it to an upcoming Apple Calendar event on this Mac.</p>
+            <div class="inline-row">
+              <input id="quickUpdateInput" type="text" placeholder="e.g. bring wine to dinner on Saturday" />
+              <button id="quickUpdateBtn" class="btn-outline btn-outline--preview">Preview</button>
+            </div>
+            <div id="quickUpdatePreview" class="preview-box hidden">
+              <p id="quickUpdatePreviewText" class="preview-text"></p>
+              <div class="actions">
+                <button id="quickUpdateConfirm" class="btn">Save</button>
+                <button id="quickUpdateCancel" class="btn-ghost">Cancel</button>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <!-- ─── Inbox ─── -->
+        <div id="panelGmail" class="panel hidden" role="tabpanel" aria-labelledby="tabBtnGmail" hidden>
+          <div class="section-header">
+            <span class="section-title">Inbox</span>
+            <div class="actions inbox-toolbar-actions">
+              <button id="scanGmailBtn" class="btn-outline hidden">Scan my inbox</button>
+              <button id="bulkApproveBtn" class="btn-ghost hidden">Add all to calendar</button>
+            </div>
+          </div>
+          <p class="muted inbox-lead">Connect Google to find events hiding in your emails.</p>
+          <p id="inboxSignInHint" class="muted inbox-lead hidden">Sign in from the header.</p>
+          <div id="inboxGoogleConnectRow" class="section inbox-google-connect hidden">
+            <button type="button" id="connectGmailBtn" class="btn btn-oauth">Connect Gmail</button>
+          </div>
+          <p id="gmailStatusText" class="muted status-text hidden" aria-live="polite"></p>
+          <div id="gmailCandidates"></div>
+          <details id="gmailAdvanced" class="details-block hidden">
+            <summary>Narrow it down</summary>
+            <label class="check-row"><input id="strictDateTimeAdv" type="checkbox" /> Only match emails with a clear date &amp; time</label>
+            <label class="check-row"><input id="strictIntentAdv" type="checkbox" /> Only match emails that look like invitations</label>
+          </details>
+        </div>
+
+        <!-- ─── Events (saved activity) ─── -->
+        <div id="panelActivity" class="panel panel-stack hidden" role="tabpanel" aria-labelledby="tabBtnActivity" hidden>
+          <div id="activityLockedOverlay" class="panel-locked-overlay hidden" aria-hidden="true">
+            <div class="panel-locked-inner">
+              <p class="panel-locked-title">Sign in to continue</p>
+              <button type="button" id="activityLockedSignInBtn" class="btn btn-sm">Sign in</button>
+            </div>
+          </div>
+          <div class="section-header">
+            <span class="section-title">Activity</span>
+            <button type="button" id="refreshLocalBtn" class="btn-ghost btn-sm btn-ghost--plans-refresh">Refresh</button>
+          </div>
+
+          <div id="monthCalendarContainer" class="calendar">
+            <div class="cal-nav">
+              <button id="monthCalPrev" class="cal-arrow" aria-label="Previous month">&larr;</button>
+              <span id="monthCalTitle" class="cal-month">April 2026</span>
+              <button id="monthCalToday" class="btn-ghost btn-sm">Today</button>
+              <button id="monthCalNext" class="cal-arrow" aria-label="Next month">&rarr;</button>
+            </div>
+            <div class="cal-weekdays">
+              <span>Su</span><span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span>
+            </div>
+            <div id="monthCalGrid" class="cal-grid"></div>
+            <div id="monthCalDayDetail" class="cal-detail hidden">
+              <div class="cal-detail-head">
+                <span id="dayDetailTitle" class="cal-detail-title"></span>
+                <button id="dayDetailClose" class="btn-ghost btn-sm">&times;</button>
+              </div>
+              <div id="dayDetailEvents"></div>
+            </div>
+          </div>
+
+          <div class="search-row">
+            <input id="activitySearch" type="search" placeholder="Search&hellip;" />
+            <select id="activitySort" class="select select-sm">
+              <option value="newest">Newest</option>
+              <option value="oldest">Oldest</option>
+              <option value="title">A–Z</option>
+            </select>
+          </div>
+          <input type="hidden" id="activitySource" value="all" />
+          <div id="activityFilteredEmpty" class="activity-filtered-empty muted hidden" role="status">
+            <p id="activityFilteredEmptyMsg" class="activity-filtered-empty-msg"></p>
+          </div>
+          <div id="localEvents" class="event-list"></div>
+        </div>
+      </main>
+    </div>
+
+    <!-- Cue sign-in / register -->
+    <div id="cueAuthModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="cueAuthTitle">
+      <div class="modal-body">
+        <div class="modal-top">
+          <strong id="cueAuthTitle">Sign in to Cue</strong>
+          <button type="button" id="closeCueAuthBtn" class="btn-ghost" aria-label="Close">&times;</button>
+        </div>
+        <label class="field-label" for="cueAuthUsername">Username</label>
+        <input id="cueAuthUsername" class="input-block" type="text" autocomplete="username" />
+        <label class="field-label" for="cueAuthPassword">Password</label>
+        <input id="cueAuthPassword" class="input-block" type="password" autocomplete="current-password" />
+        <p id="cueAuthError" class="cue-auth-error muted hidden" role="alert"></p>
+        <div class="actions" style="margin-top: 12px">
+          <button type="button" id="cueAuthSubmitBtn" class="btn">Sign in</button>
+          <button type="button" id="cueAuthRegisterBtn" class="btn-outline">Create account</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Confirm Modal -->
+    <div id="confirmModal" class="modal hidden">
+      <div class="modal-body">
+        <div class="modal-top">
+          <strong id="confirmTitle">Review</strong>
+          <button type="button" id="closeConfirmBtn" class="btn-ghost" aria-label="Close">&times;</button>
+        </div>
+        <p id="confirmParseHint" class="confirm-parse-hint muted hidden" role="note"></p>
+        <div id="confirmEvents"></div>
+      </div>
+    </div>
+
+    <!-- Share Modal -->
+    <div id="shareModal" class="modal hidden">
+      <div class="modal-body">
+        <div class="modal-top">
+          <strong>Share</strong>
+          <button id="closeShareModalBtn" class="btn-ghost">&times;</button>
+        </div>
+        <p id="shareModalTitle" class="muted"></p>
+        <pre id="shareMessagePreview" class="ocr-text"></pre>
+        <div class="actions">
+          <button id="shareWhatsAppBtn" class="btn-outline">WhatsApp</button>
+          <button id="shareCopyMsgBtn" class="btn-outline">Copy</button>
+          <button id="shareNativeBtn" class="btn-outline hidden">Share&hellip;</button>
+        </div>
+        <div class="actions" style="margin-top:4px">
+          <button id="openGoogleBtn" class="btn-ghost btn-sm">Google Calendar</button>
+          <button id="downloadIcsBtn" class="btn-ghost btn-sm">Download .ics</button>
+        </div>
+        <p id="shareCopyStatus" class="muted"></p>
+        <details class="details-block">
+          <summary>Direct links</summary>
+          <label class="field-label">Google <input id="googleShareInput" type="text" readonly /></label>
+          <label class="field-label">ICS <input id="icsShareInput" type="text" readonly /></label>
+        </details>
+      </div>
+    </div>
+
+    <div id="eventPhotoLightbox" class="event-photo-lightbox hidden" role="dialog" aria-modal="true" aria-label="Source photo">
+      <button type="button" class="event-photo-lightbox-backdrop" aria-label="Close"></button>
+      <div class="event-photo-lightbox-inner">
+        <button type="button" id="eventPhotoLightboxClose" class="event-photo-lightbox-x btn-ghost" aria-label="Close">&times;</button>
+        <img id="eventPhotoLightboxImg" class="event-photo-lightbox-img" alt="Uploaded source image" />
+      </div>
+    </div>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
