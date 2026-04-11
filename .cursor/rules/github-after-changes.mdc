@@ -1,0 +1,14 @@
+---
+description: After code changes, commit and push to GitHub with a short summary
+alwaysApply: true
+---
+
+# GitHub sync
+
+When you finish edits in this repo (`calendar-auto-add`):
+
+1. `git status` — stage only intentional files (never commit `data/`, `.env`, or secrets).
+2. `git add` the changed paths, then `git commit -m "…"` with a **one-line subject** plus optional 2–4 lines explaining what changed.
+3. `git push origin main` (remote is `origin`).
+
+Do this **before** ending the turn whenever you made substantive file changes, unless the user explicitly asked not to push.
