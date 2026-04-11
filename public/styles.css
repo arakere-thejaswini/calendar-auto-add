@@ -404,10 +404,23 @@ button {
 }
 .dropzone.dragover { border-color: var(--text); color: var(--text); background: var(--bg-hover); }
 
+.dropzone-line {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+.dropzone-camera-icon {
+  flex-shrink: 0;
+  width: 1.15em;
+  height: 1.15em;
+}
+
 .dropzone-line--narrow { display: none; }
 @media (max-width: 520px) {
   .dropzone-line--wide { display: none; }
-  .dropzone-line--narrow { display: block; }
+  .dropzone-line--narrow { display: inline-flex; }
 }
 .dropzone-loading {
   display: block;
