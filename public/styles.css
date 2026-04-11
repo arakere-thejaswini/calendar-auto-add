@@ -473,8 +473,12 @@ button {
 
 .empty-state-illustration--tiny {
   width: 72px;
+  height: 72px;
   max-width: 72px;
   margin: 0 auto 8px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
 }
 
 .empty-coach {
