@@ -36,9 +36,9 @@
       </p>
 
       <nav class="tabs" role="tablist" aria-label="Sections">
-        <button class="tab active" data-tab="quick" id="tabBtnQuick" role="tab" aria-selected="true" aria-controls="panelQuick">Quick</button>
+        <button class="tab active" data-tab="quick" id="tabBtnQuick" role="tab" aria-selected="true" aria-controls="panelQuick">Jot</button>
         <button class="tab" data-tab="gmail" id="tabBtnGmail" role="tab" aria-selected="false" aria-controls="panelGmail">Inbox</button>
-        <button class="tab" data-tab="activity" id="tabBtnActivity" role="tab" aria-selected="false" aria-controls="panelActivity">Activity</button>
+        <button class="tab" data-tab="activity" id="tabBtnActivity" role="tab" aria-selected="false" aria-controls="panelActivity">My Events</button>
       </nav>
 
       <main>
@@ -51,9 +51,9 @@
             </div>
           </div>
           <section class="section">
-            <textarea id="textInput" rows="2" placeholder="e.g. Dinner with Sam Friday 7pm"></textarea>
+            <textarea id="textInput" rows="2" placeholder="e.g. dinner with Sam Friday 7pm"></textarea>
             <div class="actions">
-              <button id="parseTextBtn" class="btn">Add</button>
+              <button id="parseTextBtn" class="btn">Add it</button>
             </div>
           </section>
 
@@ -71,7 +71,9 @@
 
           <section class="section">
             <label for="quickUpdateInput" class="section-title">Add a note to an event</label>
-            <p class="section-hint muted">Describe what to add; we match it to an upcoming Apple Calendar event on this Mac.</p>
+            <p class="section-hint muted">
+              Adds a note to an event that already exists on your calendar (for example a reminder or detail). Pick Preview to see which event matches.
+            </p>
             <div class="inline-row">
               <input id="quickUpdateInput" type="text" placeholder="e.g. bring wine to dinner on Saturday" />
               <button id="quickUpdateBtn" class="btn-outline btn-outline--preview">Preview</button>
@@ -98,7 +100,7 @@
           <p class="muted inbox-lead">Connect Google to find events hiding in your emails.</p>
           <p id="inboxSignInHint" class="muted inbox-lead hidden">Sign in from the header.</p>
           <div id="inboxGoogleConnectRow" class="section inbox-google-connect hidden">
-            <button type="button" id="connectGmailBtn" class="btn btn-oauth">Connect Gmail</button>
+            <button type="button" id="connectGmailBtn" class="btn btn-oauth">Connect Google</button>
           </div>
           <p id="gmailStatusText" class="muted status-text hidden" aria-live="polite"></p>
           <div id="gmailCandidates"></div>
@@ -118,7 +120,7 @@
             </div>
           </div>
           <div class="section-header">
-            <span class="section-title">Activity</span>
+            <span class="section-title">My Events</span>
             <button type="button" id="refreshLocalBtn" class="btn-ghost btn-sm btn-ghost--plans-refresh">Refresh</button>
           </div>
 
@@ -143,7 +145,7 @@
           </div>
 
           <div class="search-row">
-            <input id="activitySearch" type="search" placeholder="Search&hellip;" />
+            <input id="activitySearch" type="search" placeholder="Search..." />
             <select id="activitySort" class="select select-sm">
               <option value="newest">Newest</option>
               <option value="oldest">Oldest</option>

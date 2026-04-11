@@ -462,7 +462,7 @@ async function parseText() {
     if (data.events.length) showConfirmModal(data.events, "text");
     else showToast("No date or time in that text yet. Try something like “dinner Friday 7pm”.", "info");
   } catch (e) { showToast(e.message, "error"); }
-  finally { parseTextBtn.textContent = "Add"; parseTextBtn.disabled = false; }
+  finally { parseTextBtn.textContent = "Add it"; parseTextBtn.disabled = false; }
 }
 
 /* ── Image parsing → confirm ──────────────── */
@@ -898,7 +898,7 @@ function renderActivityList() {
       ${EMPTY_STATE_MARKUP}
       <p class="empty-coach-title">No events here yet</p>
       <ul>
-        <li>On <strong>Quick</strong>, describe an event or upload a flyer, confirm it, and it is saved to this list and the month grid.</li>
+        <li>On <strong>Jot</strong>, describe an event or upload a flyer, confirm it, and it is saved to this list and the month grid.</li>
         <li>On <strong>Inbox</strong>, connect Google if you want Cue to list emails that might be events; when you approve one, it is saved here the same way.</li>
       </ul>
     </div>`;
