@@ -1,0 +1,11 @@
+node_modules/
+uploads/
+data/sessions/
+data/users/
+data/gmail_tokens.json
+data/gmail_credentials.json
+data/review_queue.json
+data/events.json
+.env
+.env.*
+*.log

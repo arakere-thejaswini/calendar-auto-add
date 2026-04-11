@@ -1,0 +1,31 @@
+# App URL: https://on-cue.fly.dev (Fly does not allow underscores in app names; use hyphen.)
+
+app = "on-cue"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  PORT = "3030"
+  CUE_DATA_DIR = "/data"
+  TRUST_PROXY = "1"
+  COOKIE_SECURE = "1"
+
+[http_service]
+  internal_port = 3030
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1
+
+[[mounts]]
+  source = "oncue_data"
+  destination = "/data"

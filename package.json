@@ -1,0 +1,30 @@
+{
+  "name": "calendar-auto-add",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "dev": "PORT=3030 nodemon server.js",
+    "start": "PORT=3030 node server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "chrono-node": "^2.9.0",
+    "dictionary-en": "^3.2.0",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.3.2",
+    "express-session": "^1.19.0",
+    "googleapis": "^171.4.0",
+    "helmet": "^8.1.0",
+    "multer": "^2.1.1",
+    "nspell": "^2.1.5",
+    "session-file-store": "^1.5.0",
+    "sharp": "^0.34.5",
+    "tesseract.js": "^7.0.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
+  }
+}
