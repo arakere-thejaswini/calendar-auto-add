@@ -1,19 +1,19 @@
 :root {
   --bg: #ffffff;
-  --bg-page: #f1f5f9;
+  --bg-page: #f5f3ee;
   --bg-input: #ffffff;
-  --bg-hover: #e2e8f0;
-  --bg-secondary: #f8fafc;
-  --text: #0f172a;
-  --text-secondary: #64748b;
-  --text-tertiary: #94a3b8;
-  --border: #e2e8f0;
-  --accent: #e5b80c;
-  --accent-text: #0f172a;
+  --bg-hover: #ebe8e0;
+  --bg-secondary: #f5f5f4;
+  --text: #171717;
+  --text-secondary: #737373;
+  --text-tertiary: #a3a3a3;
+  --border: #e5e5e5;
+  --accent: #171717;
+  --accent-text: #ffffff;
   --success: #16a34a;
   --danger: #dc2626;
-  --radius: 8px;
-  --font: "DM Sans", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --radius: 6px;
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   --transition: 120ms ease;
 }
@@ -312,7 +312,7 @@ textarea { resize: vertical; min-height: 76px; }
   min-width: 140px;
   appearance: none;
   background-color: var(--bg-input);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' fill='%2364748b' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10z'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' fill='%23737373' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10z'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 10px center;
   padding-right: 28px;
@@ -970,7 +970,7 @@ button {
 }
 .toast-success { background: var(--success); color: #fff; border-color: var(--success); }
 .toast-error { background: var(--danger); color: #fff; }
-.toast-info { background: var(--text); color: var(--bg-page); }
+.toast-info { background: var(--text); color: #fff; }
 @keyframes toastIn {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
@@ -980,7 +980,7 @@ button {
 
 .modal {
   position: fixed; inset: 0;
-  background: rgba(15, 23, 42, 0.45);
+  background: rgba(23, 23, 23, 0.4);
   backdrop-filter: blur(4px);
   display: flex; align-items: center; justify-content: center;
   padding: 24px;
@@ -995,7 +995,7 @@ button {
   border-radius: var(--radius);
   padding: 24px;
   border: 1px solid var(--border);
-  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.12);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.08);
   animation: fadeUp 200ms ease;
 }
 
@@ -1039,7 +1039,7 @@ button {
   padding: 0;
   margin: 0;
   cursor: pointer;
-  background: rgba(15, 23, 42, 0.5);
+  background: rgba(23, 23, 23, 0.45);
   backdrop-filter: blur(3px);
 }
 .event-photo-lightbox-inner {
