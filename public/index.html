@@ -182,10 +182,15 @@
 
     <!-- Confirm Modal -->
     <div id="confirmModal" class="modal hidden">
-      <div class="modal-body">
-        <div class="modal-top">
-          <strong id="confirmTitle">Review</strong>
-          <button type="button" id="closeConfirmBtn" class="btn-ghost" aria-label="Close">&times;</button>
+      <div class="modal-body modal-body--confirm">
+        <div class="modal-confirm-header">
+          <div class="modal-confirm-art-wrap">
+            <img class="modal-confirm-illustration" src="/illustration-empty.png" alt="" width="56" height="56" loading="lazy" />
+          </div>
+          <div class="modal-confirm-header-main">
+            <strong id="confirmTitle">Does this look right?</strong>
+          </div>
+          <button type="button" id="closeConfirmBtn" class="modal-confirm-close btn-ghost" aria-label="Close">&times;</button>
         </div>
         <p id="confirmParseHint" class="confirm-parse-hint muted hidden" role="note"></p>
         <div id="confirmEvents"></div>

@@ -95,7 +95,8 @@ let sessionInfo = { authenticated: false };
 
 const TAB_KEY = "cueTab";
 
-const EMPTY_STATE_MARKUP = "";
+const EMPTY_STATE_MARKUP =
+  '<img class="empty-state-illustration" src="/illustration-empty.png" alt="" width="132" height="132" loading="lazy" />';
 
 /* ── Helpers ──────────────────────────────── */
 
@@ -222,7 +223,20 @@ async function signOut() {
 function showToast(msg, type = "info", ms = 3500) {
   const el = document.createElement("div");
   el.className = `toast toast-${type}`;
-  el.textContent = msg;
+  if (type === "success") {
+    el.classList.add("toast--with-art");
+    const img = document.createElement("img");
+    img.src = "/illustration-success.png";
+    img.alt = "";
+    img.className = "toast-illustration";
+    img.width = 44;
+    img.height = 44;
+    el.appendChild(img);
+  }
+  const text = document.createElement("span");
+  text.className = "toast-text";
+  text.textContent = msg;
+  el.appendChild(text);
   toastRoot.appendChild(el);
   const t = setTimeout(() => el.remove(), ms);
   el.addEventListener("click", () => { clearTimeout(t); el.remove(); });
@@ -359,7 +373,7 @@ function readConfirmRowTitle(row, fallbackTitle) {
 
 function showConfirmModal(events, source, options = {}) {
   const attachedPhotoId = options.photoId || null;
-  confirmTitle.textContent = events.length === 1 ? "Add this event?" : `Add these ${events.length} events?`;
+  confirmTitle.textContent = "Does this look right?";
   confirmEvents.innerHTML = "";
   let addedCount = 0;
 
@@ -404,7 +418,7 @@ function showConfirmModal(events, source, options = {}) {
     addB.type = "button";
     addB.className = "btn btn-sm cf-add";
     addB.dataset.idx = String(i);
-    addB.textContent = "Add";
+    addB.textContent = "Confirm";
     actions.appendChild(addB);
 
     row.appendChild(info);
@@ -418,12 +432,12 @@ function showConfirmModal(events, source, options = {}) {
         const title = readConfirmRowTitle(row, ev.title);
         const evToSend = { ...ev, title };
         const ok = await addEvent(evToSend, source, { photoId: attachedPhotoId });
-        if (ok === false) { this.textContent = "Add"; this.disabled = false; return; }
+        if (ok === false) { this.textContent = "Confirm"; this.disabled = false; return; }
         row.classList.add("added");
         this.textContent = "✓ Added";
         addedCount++;
         if (addedCount === events.length) setTimeout(closeConfirmModal, 500);
-      } catch (err) { showToast(err.message, "error"); this.textContent = "Add"; this.disabled = false; }
+      } catch (err) { showToast(err.message, "error"); this.textContent = "Confirm"; this.disabled = false; }
     });
   });
 
@@ -650,15 +664,11 @@ async function submitCueAuth(registerMode) {
     closeCueAuthModal();
     if (cueAuthUsername) cueAuthUsername.value = "";
     await refreshSession();
-    showToast(registerMode ? "Account created. You’re signed in." : "Signed in.", "success");
-    if (sessionInfo.authenticated) {
-      await loadCalendars().catch(() => {});
-      await loadGmailStatus().catch(() => {});
-      await loadReviewQueue().catch(() => {});
-      await loadLocalEvents().catch(() => {});
-      renderActivityList();
-      renderMonthCalendar();
-    }
+    try {
+      sessionStorage.setItem(TAB_KEY, "quick");
+      sessionStorage.setItem("cueSignedInFlash", registerMode ? "created" : "in");
+    } catch {}
+    window.location.reload();
   } catch (e) {
     if (cueAuthError) {
       cueAuthError.textContent = e.message || "Something went wrong.";
@@ -735,7 +745,7 @@ function renderReviewQueue() {
   const pending = all.filter((s) => s.status === "pending");
   const processed = all.filter((s) => s.status !== "pending").sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0));
   if (!pending.length && !processed.length) {
-    gmailCandidates.innerHTML = `<div class="inbox-empty-hint muted"><p style="padding:10px 0;margin:0">Queue empty — try <strong>Scan my inbox</strong>.</p></div>`;
+    gmailCandidates.innerHTML = `<div class="inbox-empty-hint muted"><img class="empty-state-illustration empty-state-illustration--compact" src="/illustration-empty.png" alt="" width="96" height="96" loading="lazy" /><p style="padding:10px 0;margin:0">Queue empty — try <strong>Scan my inbox</strong>.</p></div>`;
     return;
   }
   const root = document.createElement("div");
@@ -875,7 +885,7 @@ function eventLineHtml(ev) {
 
 function renderActivityList() {
   if (!sessionInfo.authenticated) {
-    localEvents.innerHTML = `<div class="empty-coach">
+    localEvents.innerHTML = `<div class="empty-coach empty-coach--with-art">
       ${EMPTY_STATE_MARKUP}
       <p class="empty-coach-title">Sign in to view your events</p>
       <p class="muted" style="font-size:13px;line-height:1.55;margin:0">Use <strong>Sign in</strong> in the header (or create an account). Your month grid and list stay on your account.</p>
@@ -887,14 +897,11 @@ function renderActivityList() {
   const deduped = dedupeEventsPreferPhotoId(list);
   localEvents.innerHTML = "";
   if (activityFilteredEmpty && activityFilteredEmptyMsg) {
-    const filteredOut = localEventsCache.length > 0 && list.length === 0;
-    activityFilteredEmptyMsg.textContent = filteredOut
-      ? "No events match your search or filters."
-      : "";
+    activityFilteredEmptyMsg.textContent = "Nothing here yet 🌱";
     activityFilteredEmpty.classList.toggle("hidden", list.length > 0 || !localEventsCache.length);
   }
   if (!localEventsCache.length) {
-    localEvents.innerHTML = `<div class="empty-coach">
+    localEvents.innerHTML = `<div class="empty-coach empty-coach--with-art">
       ${EMPTY_STATE_MARKUP}
       <p class="empty-coach-title">No events here yet</p>
       <ul>
@@ -1000,7 +1007,7 @@ function showDayDetail(dateStr) {
   const events = getEventsForDate(dateStr);
   dayDetailEvents.innerHTML = "";
   if (!events.length) {
-    dayDetailEvents.innerHTML = `<div class="detail-empty">No events</div>`;
+    dayDetailEvents.innerHTML = `<div class="detail-empty"><img class="empty-state-illustration empty-state-illustration--tiny" src="/illustration-empty.png" alt="" width="72" height="72" loading="lazy" />No events</div>`;
   }
   else events.sort((a, b) => new Date(a.start) - new Date(b.start)).forEach((ev, i) => {
     const time = new Date(ev.start).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
@@ -1035,6 +1042,19 @@ const daisyQuips = [
 let lastDaisyIdx = -1;
 
 function daisyClick() {
+  const daisyBtn = $("daisyBtn");
+  const daisyIcon = daisyBtn?.querySelector?.(".logo-icon");
+  if (daisyIcon) {
+    daisyBtn.classList.remove("daisy-spinning");
+    void daisyIcon.offsetWidth;
+    daisyBtn.classList.add("daisy-spinning");
+    daisyIcon.addEventListener(
+      "animationend",
+      () => daisyBtn.classList.remove("daisy-spinning"),
+      { once: true }
+    );
+  }
+
   let idx;
   do { idx = Math.floor(Math.random() * daisyQuips.length); } while (idx === lastDaisyIdx && daisyQuips.length > 1);
   lastDaisyIdx = idx;
@@ -1133,6 +1153,13 @@ renderMonthCalendar();
     syncAdvancedFromQueue();
   }
   updateSessionUI();
+  try {
+    const flash = sessionStorage.getItem("cueSignedInFlash");
+    if (flash && sessionInfo.authenticated) {
+      sessionStorage.removeItem("cueSignedInFlash");
+      showToast(flash === "created" ? "Account created. You’re signed in." : "Signed in.", "success");
+    }
+  } catch {}
   if (!sessionInfo.authenticated) {
     openCueAuthModal();
   }
@@ -1143,3 +1170,4 @@ setInterval(() => {
   loadGmailStatus().catch(() => {});
   loadReviewQueue().catch(() => {});
 }, 20000);
+
