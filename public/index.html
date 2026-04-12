@@ -44,8 +44,9 @@
       <main>
         <!-- ─── Add ─── -->
         <div id="panelQuick" class="panel panel-stack" role="tabpanel" aria-labelledby="tabBtnQuick">
-          <div id="quickLockedOverlay" class="panel-locked-overlay hidden" aria-hidden="true">
-            <div class="panel-locked-inner">
+          <div id="quickLockedOverlay" class="panel-locked-mount hidden" aria-hidden="true">
+            <div class="panel-locked-backdrop" aria-hidden="true"></div>
+            <div class="panel-locked-dialog">
               <p class="panel-locked-title">Sign in to continue</p>
               <button type="button" id="quickLockedSignInBtn" class="btn btn-sm">Sign in</button>
             </div>
@@ -113,8 +114,9 @@
 
         <!-- ─── Events (saved activity) ─── -->
         <div id="panelActivity" class="panel panel-stack hidden" role="tabpanel" aria-labelledby="tabBtnActivity" hidden>
-          <div id="activityLockedOverlay" class="panel-locked-overlay hidden" aria-hidden="true">
-            <div class="panel-locked-inner">
+          <div id="activityLockedOverlay" class="panel-locked-mount hidden" aria-hidden="true">
+            <div class="panel-locked-backdrop" aria-hidden="true"></div>
+            <div class="panel-locked-dialog">
               <p class="panel-locked-title">Sign in to continue</p>
               <button type="button" id="activityLockedSignInBtn" class="btn btn-sm">Sign in</button>
             </div>

@@ -329,25 +329,33 @@ textarea { resize: vertical; min-height: 76px; }
 .inbox-google-connect .btn-oauth { width: 100%; max-width: 320px; }
 
 .panel-stack { position: relative; }
-/* Full panel block (same as before); small card is only .panel-locked-inner. */
-.panel-locked-overlay {
+/* Scrim fills panel; one compact .panel-locked-dialog (no nested “double box”). */
+.panel-locked-mount {
   position: absolute;
   inset: 0;
   z-index: 6;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  backdrop-filter: blur(3px);
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
-  padding: 20px 16px;
+  padding: 28px 16px 16px;
   border-radius: inherit;
+  pointer-events: none;
 }
-.panel-locked-overlay.hidden { display: none; }
-.panel-locked-inner {
+.panel-locked-backdrop {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: rgba(245, 243, 238, 0.72);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  pointer-events: auto;
+}
+.panel-locked-dialog {
+  position: relative;
+  z-index: 1;
+  pointer-events: auto;
   width: fit-content;
   max-width: min(17.5rem, calc(100% - 8px));
-  margin: 0 auto;
   text-align: center;
   background: var(--bg);
   border: 1px solid var(--border);
@@ -1359,7 +1367,7 @@ button {
     font-size: 17px;
   }
 
-  .panel-locked-inner {
+  .panel-locked-dialog {
     padding: 18px 22px 20px;
     max-width: min(18rem, calc(100% - 12px));
   }
