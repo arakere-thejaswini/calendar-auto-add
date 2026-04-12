@@ -1184,9 +1184,7 @@ renderMonthCalendar();
       showToast(flash === "created" ? "Account created. You’re signed in." : "Signed in.", "success");
     }
   } catch {}
-  if (!sessionInfo.authenticated) {
-    openCueAuthModal();
-  }
+  /* Signed-out users see the hero + Jot scrim; they open Sign in from the header or overlay when ready. */
 })();
 
 setInterval(() => {
