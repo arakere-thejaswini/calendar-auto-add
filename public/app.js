@@ -10,6 +10,7 @@ const photoCard = $("photoCard");
 const calendarNameInput = $("calendarNameInput");
 const sessionBar = $("sessionBar");
 const appHero = $("appHero");
+const appHeroSub = $("appHeroSub");
 const openCueAuthBtn = $("openCueAuthBtn");
 const signOutBtn = $("signOutBtn");
 const cueAuthModal = $("cueAuthModal");
@@ -169,7 +170,15 @@ async function refreshSession() {
 function updateSessionUI() {
   const authed = sessionInfo.authenticated;
   const inboxReady = authed && Boolean(sessionInfo.gmailConnected);
-  if (appHero) appHero.classList.toggle("hidden", authed);
+  if (appHeroSub) {
+    if (authed) {
+      appHeroSub.classList.add("hidden");
+    } else {
+      appHeroSub.classList.remove("hidden");
+      appHeroSub.innerHTML =
+        "<strong>Sign in</strong> to use the app. For Gmail or Google Calendar, open <strong>Inbox</strong> and connect Google.";
+    }
+  }
   if (scanGmailBtn && bulkApproveBtn) {
     scanGmailBtn.classList.toggle("hidden", !inboxReady);
     bulkApproveBtn.classList.toggle("hidden", !inboxReady);
