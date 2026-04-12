@@ -4,6 +4,8 @@ const crypto = require("node:crypto");
 const express = require("express");
 const session = require("express-session");
 const FileStore = require("session-file-store")(session);
+const { RedisStore } = require("connect-redis");
+const { createClient: createRedisClient } = require("redis");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const multer = require("multer");
@@ -71,17 +73,39 @@ if (process.env.NODE_ENV === "production" && !process.env.SESSION_SECRET) {
 const sessionSecret =
   process.env.SESSION_SECRET || "DEV_ONLY_UNSAFE_SESSION_SECRET_CHANGE_FOR_PRODUCTION";
 
-app.use(
-  helmet({
-    contentSecurityPolicy: false,
-    crossOriginOpenerPolicy: { policy: "same-origin" },
-  }),
-);
+const sessionCookieOptions = {
+  httpOnly: true,
+  secure: process.env.COOKIE_SECURE === "1" || Boolean(process.env.VERCEL),
+  sameSite: "lax",
+  maxAge: 14 * 24 * 60 * 60 * 1000,
+};
 
-app.use(
-  session({
+/** Redis (e.g. Upstash) survives Vercel cold starts; file store is fine on Fly with /data volume. */
+const sessionMiddlewarePromise = (async () => {
+  await ensureDataDir();
+  const redisUrl = process.env.REDIS_URL && String(process.env.REDIS_URL).trim();
+  if (redisUrl) {
+    const client = createRedisClient({ url: redisUrl });
+    client.on("error", (err) => console.error("[cue] Redis session:", err.message));
+    await client.connect();
+    console.log("[cue] Session store: Redis");
+    return session({
+      store: new RedisStore({ client, prefix: "cue:sess:" }),
+      name: "cue.sid",
+      secret: sessionSecret,
+      resave: false,
+      saveUninitialized: false,
+      cookie: sessionCookieOptions,
+    });
+  }
+  if (process.env.VERCEL) {
+    console.warn(
+      "[cue] No REDIS_URL — sessions are file-backed under /tmp and are lost when the function cold-starts. Add Upstash Redis and set REDIS_URL for stable sign-in on Vercel.",
+    );
+  }
+  console.log("[cue] Session store: file (" + path.join(dataDir, "sessions") + ")");
+  return session({
     store: new FileStore({
-      /* Must live under CUE_DATA_DIR on Fly/Docker — not /app/data (ephemeral). */
       path: path.join(dataDir, "sessions"),
       logFn: () => {},
     }),
@@ -89,14 +113,20 @@ app.use(
     secret: sessionSecret,
     resave: false,
     saveUninitialized: false,
-    cookie: {
-      httpOnly: true,
-      secure: process.env.COOKIE_SECURE === "1" || Boolean(process.env.VERCEL),
-      sameSite: "lax",
-      maxAge: 14 * 24 * 60 * 60 * 1000,
-    },
+    cookie: sessionCookieOptions,
+  });
+})();
+
+app.use(
+  helmet({
+    contentSecurityPolicy: false,
+    crossOriginOpenerPolicy: { policy: "same-origin" },
   }),
 );
+
+app.use((req, res, next) => {
+  sessionMiddlewarePromise.then((mw) => mw(req, res, next)).catch(next);
+});
 
 const upload = multer({ dest: uploadRoot });
 const monitorState = {

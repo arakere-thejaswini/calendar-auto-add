@@ -1,16 +1,34 @@
 Vercel deploy notes (plain text)
 
-Required env vars in the Vercel project (Settings > Environment Variables):
-  SESSION_SECRET   long random string (production refuses to start without it)
-  PUBLIC_BASE_URL  https://your-project.vercel.app  (Google OAuth / Gmail redirect URIs)
+Required env (Vercel → Project → Settings → Environment Variables):
+  SESSION_SECRET    long random string (app exits in production without it)
+  PUBLIC_BASE_URL   https://your-project.vercel.app  (Google OAuth redirect / origins)
 
-Recommended:
-  TRUST_PROXY      1  (optional; VERCEL is already detected for trust proxy + secure cookies)
+Strongly recommended on Vercel (fixes “logged out after a while”):
+  REDIS_URL         from Upstash (free tier): create a Redis database, copy the
+                    rediss://… URL, paste as REDIS_URL. Sessions then survive
+                    serverless cold starts. Without it, sessions live under /tmp
+                    and disappear when the function instance is recycled.
 
-Writable paths when VERCEL is set (no CUE_DATA_DIR needed for a quick demo):
-  Data:   /tmp/cue-data   (ephemeral — resets when the function instance recycles)
-  Uploads: /tmp/cue-uploads
+Optional:
+  TRUST_PROXY       1  (not required; VERCEL is already detected for trust proxy + secure cookies)
 
-Override with CUE_DATA_DIR and CUE_UPLOADS_DIR if you attach persistent storage later.
+Writable paths when VERCEL is set and you have NOT set CUE_DATA_DIR:
+  App data (events, accounts, Gmail queue JSON, event photos): /tmp/cue-data
+  Multer temp OCR files:                                      /tmp/cue-uploads
+  Those trees are still EPHEMERAL on Vercel — REDIS_URL only fixes sessions, not
+  your saved events or uploads. For durable everything, use Fly (below) or plan
+  a database / blob migration.
 
-Google Cloud Console: add your Vercel URL to OAuth redirect URIs and JavaScript origins.
+Overrides (advanced):
+  CUE_DATA_DIR      absolute path to a writable directory (e.g. mounted volume)
+  CUE_UPLOADS_DIR   absolute path for multer temp files
+
+Production with a real disk (recommended for Cue today):
+  Deploy with Docker + Fly.io using the included fly.toml: volume "oncue_data"
+  is mounted at /data and CUE_DATA_DIR=/data so accounts, events, queue, photos,
+  and (without REDIS_URL) sessions all persist. App name there is on-cue; adjust
+  if you fork.
+
+Google Cloud Console: add your PUBLIC_BASE_URL host to OAuth redirect URIs and
+JavaScript origins.
