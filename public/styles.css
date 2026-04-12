@@ -333,25 +333,30 @@ textarea { resize: vertical; min-height: 76px; }
   position: absolute;
   inset: 0;
   z-index: 6;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  backdrop-filter: blur(3px);
+  background: rgba(245, 243, 238, 0.55);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: center;
-  padding: 24px 14px 14px;
+  padding: 24px 16px;
   border-radius: inherit;
 }
 .panel-locked-overlay.hidden { display: none; }
 .panel-locked-inner {
-  max-width: 22em;
+  max-width: 20em;
   text-align: center;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px 26px 22px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.06);
 }
 .panel-locked-title {
   font-size: 15px;
   font-weight: 600;
   color: var(--text);
-  margin: 0 0 12px;
+  margin: 0 0 14px;
 }
 
 /* ── Buttons ─────────────────────────────── */
@@ -1349,6 +1354,11 @@ button {
 
   .panel-locked-title {
     font-size: 17px;
+  }
+
+  .panel-locked-inner {
+    padding: 22px 28px 24px;
+    max-width: min(20em, 100%);
   }
 
   .status-text {
