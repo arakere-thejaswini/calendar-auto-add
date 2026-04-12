@@ -329,45 +329,27 @@ textarea { resize: vertical; min-height: 76px; }
 .inbox-google-connect .btn-oauth { width: 100%; max-width: 320px; }
 
 .panel-stack { position: relative; }
-/* Scrim fills panel; one compact .panel-locked-dialog (no nested “double box”). */
-.panel-locked-mount {
+/* One solid layer over the panel — no scrim, no nested card. */
+.panel-locked-overlay {
   position: absolute;
   inset: 0;
   z-index: 6;
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  padding: 28px 16px 16px;
-  border-radius: inherit;
-  pointer-events: none;
-}
-.panel-locked-backdrop {
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: rgba(245, 243, 238, 0.72);
-  backdrop-filter: blur(3px);
-  -webkit-backdrop-filter: blur(3px);
-  pointer-events: auto;
-}
-.panel-locked-dialog {
-  position: relative;
-  z-index: 1;
-  pointer-events: auto;
-  width: fit-content;
-  max-width: min(17.5rem, calc(100% - 8px));
-  text-align: center;
-  background: var(--bg);
+  background: var(--bg-secondary);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 16px 20px 18px;
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.05);
+  border-radius: inherit;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 28px 18px 18px;
 }
 .panel-locked-title {
   font-size: 15px;
   font-weight: 600;
   color: var(--text);
-  margin: 0 0 10px;
+  margin: 0 0 12px;
+  text-align: center;
+  max-width: 20em;
 }
 
 /* ── Buttons ─────────────────────────────── */
@@ -1365,11 +1347,6 @@ button {
 
   .panel-locked-title {
     font-size: 17px;
-  }
-
-  .panel-locked-dialog {
-    padding: 18px 22px 20px;
-    max-width: min(18rem, calc(100% - 12px));
   }
 
   .status-text {
