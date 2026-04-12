@@ -185,6 +185,8 @@ function updateSessionUI() {
   }
   if (quickLockedOverlay) quickLockedOverlay.classList.toggle("hidden", authed);
   if (activityLockedOverlay) activityLockedOverlay.classList.toggle("hidden", authed);
+  if (panelQuick) panelQuick.classList.toggle("panel-stack--locked", !authed);
+  if (panelActivity) panelActivity.classList.toggle("panel-stack--locked", !authed);
 
   if (!sessionBar || !signOutBtn) return;
 

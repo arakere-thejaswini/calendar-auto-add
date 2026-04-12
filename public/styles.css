@@ -329,19 +329,29 @@ textarea { resize: vertical; min-height: 76px; }
 .inbox-google-connect .btn-oauth { width: 100%; max-width: 320px; }
 
 .panel-stack { position: relative; }
-/* One solid layer over the panel — no scrim, no nested card. */
+/* Short band at top (~half viewport max); siblings dimmed + non-interactive while locked. */
+.panel-stack--locked > *:not(.panel-locked-overlay) {
+  pointer-events: none;
+  user-select: none;
+}
 .panel-locked-overlay {
   position: absolute;
-  inset: 0;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: min(42vh, 260px);
+  min-height: 118px;
   z-index: 6;
   background: var(--bg-secondary);
   border: 1px solid var(--border);
-  border-radius: inherit;
+  border-bottom: 1px solid var(--border);
+  border-radius: var(--radius) var(--radius) 0 0;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: flex-start;
-  padding: 28px 18px 18px;
+  justify-content: center;
+  padding: 18px 16px;
+  box-sizing: border-box;
 }
 .panel-locked-title {
   font-size: 15px;
@@ -1347,6 +1357,12 @@ button {
 
   .panel-locked-title {
     font-size: 17px;
+  }
+
+  .panel-locked-overlay {
+    height: min(36vh, 240px);
+    min-height: 108px;
+    padding: 16px 14px;
   }
 
   .status-text {
