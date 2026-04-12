@@ -1,9 +1,12 @@
 const path = require("node:path");
 const fs = require("node:fs/promises");
 
-const dataDir = process.env.CUE_DATA_DIR
-  ? path.resolve(process.env.CUE_DATA_DIR)
-  : path.join(__dirname, "..", "data");
+const dataDir =
+  process.env.CUE_DATA_DIR != null && String(process.env.CUE_DATA_DIR).trim() !== ""
+    ? path.resolve(process.env.CUE_DATA_DIR)
+    : process.env.VERCEL
+      ? path.join("/tmp", "cue-data")
+      : path.join(__dirname, "..", "data");
 
 async function ensureDataDir() {
   await fs.mkdir(dataDir, { recursive: true });

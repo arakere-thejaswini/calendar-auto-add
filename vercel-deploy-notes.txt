@@ -1,0 +1,16 @@
+Vercel deploy notes (plain text)
+
+Required env vars in the Vercel project (Settings > Environment Variables):
+  SESSION_SECRET   long random string (production refuses to start without it)
+  PUBLIC_BASE_URL  https://your-project.vercel.app  (Google OAuth / Gmail redirect URIs)
+
+Recommended:
+  TRUST_PROXY      1  (optional; VERCEL is already detected for trust proxy + secure cookies)
+
+Writable paths when VERCEL is set (no CUE_DATA_DIR needed for a quick demo):
+  Data:   /tmp/cue-data   (ephemeral — resets when the function instance recycles)
+  Uploads: /tmp/cue-uploads
+
+Override with CUE_DATA_DIR and CUE_UPLOADS_DIR if you attach persistent storage later.
+
+Google Cloud Console: add your Vercel URL to OAuth redirect URIs and JavaScript origins.

@@ -47,12 +47,20 @@ const {
 const { listWritableGoogleCalendars, insertGoogleCalendarEvent } = require("./src/googleCalendarService");
 
 const { ensureDataDir, dataDir } = require("./src/dataPaths");
+
+/** Multer temp uploads; must be writable (use /tmp on Vercel — deploy bundle is read-only). */
+const uploadRoot =
+  process.env.CUE_UPLOADS_DIR != null && String(process.env.CUE_UPLOADS_DIR).trim() !== ""
+    ? path.resolve(process.env.CUE_UPLOADS_DIR)
+    : process.env.VERCEL
+      ? path.join("/tmp", "cue-uploads")
+      : path.join(__dirname, "uploads");
 const { assertValidUserId, userBaseDir } = require("./src/userPaths");
 const { register: cueRegister, login: cueLogin, getUsernameForCueId } = require("./src/cueAccounts");
 
 const app = express();
 const port = Number(process.env.PORT) || 3030;
-if (process.env.TRUST_PROXY === "1") {
+if (process.env.TRUST_PROXY === "1" || process.env.VERCEL) {
   app.set("trust proxy", 1);
 }
 
@@ -83,14 +91,14 @@ app.use(
     saveUninitialized: false,
     cookie: {
       httpOnly: true,
-      secure: process.env.COOKIE_SECURE === "1",
+      secure: process.env.COOKIE_SECURE === "1" || Boolean(process.env.VERCEL),
       sameSite: "lax",
       maxAge: 14 * 24 * 60 * 60 * 1000,
     },
   }),
 );
 
-const upload = multer({ dest: path.join(__dirname, "uploads") });
+const upload = multer({ dest: uploadRoot });
 const monitorState = {
   timer: null,
   lastRunAt: null,
@@ -465,7 +473,7 @@ app.post("/api/parse/image", upload.single("image"), async (req, res) => {
   }
 
   let worker;
-  const preprocessedPath = path.join(__dirname, "uploads", `${req.file.filename}-prep.png`);
+  const preprocessedPath = path.join(uploadRoot, `${req.file.filename}-prep.png`);
   try {
     worker = await createWorker("eng");
     await worker.setParameters({
@@ -1221,6 +1229,7 @@ app.post("/api/events/update-note-from-text", async (req, res) => {
 
 (async () => {
   await ensureDataDir();
+  await fs.mkdir(uploadRoot, { recursive: true });
   if (process.env.NODE_ENV === "production") {
     const pub = (process.env.PUBLIC_BASE_URL || "").trim();
     if (!pub.startsWith("https://")) {
