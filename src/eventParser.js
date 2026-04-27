@@ -330,23 +330,63 @@ function sanitizeTimeToken(token) {
   return `${hour}:${minutes}${suffix}`;
 }
 
+/**
+ * Parse a single OCR line for a `start-end` time range, optionally pairing it
+ * with a date on the same line, in the line itself, or carried over from
+ * `optionalDatePrefix` (a date-only line we matched immediately above).
+ * Anything left over in the line that isn't date or time becomes a location
+ * candidate — that's how a flyer line like "Artisan Kitchen 1PM - 3 PM" with
+ * "Saturday May 9, 2026" on the line above turns into a single event with
+ * the right time, the right date, and a populated location field.
+ */
+const OCR_TIME_RANGE_RE =
+  /(\d{1,2}(?::\d{2})?\s?(?:am|pm))\s*(?:-|to|–|—)\s*(\d{1,2}(?::\d{2})?\s?(?:am|pm))/i;
+/* The month part must actually be a month name — without this, an OCR'd line
+ * like "Artisan Kitchen 1PM - 3 PM" matched "Kitchen 1" as month+day and
+ * silently swallowed the date that should have been carried over from the
+ * previous line. */
+const OCR_DATE_PIECE_RE =
+  /((?:mon|tue|wed|thu|fri|sat|sun)\w*,?\s+)?((?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2}(?:st|nd|rd|th)?(?:,\s*\d{4})?)/i;
+const OCR_DATEY_LINE_RE =
+  /\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b\s*\d|\b(?:mon|tue|wed|thu|fri|sat|sun)\w*\b/i;
+
 function parseDateRangeLine(line, ref, optionalDatePrefix = "") {
-  const normalized = `${optionalDatePrefix} ${line}`
+  const cleaned = String(line || "")
     .replace(/\bfrom\b/i, "")
     .replace(/\bPST\b|\bEST\b|\bCST\b|\bMST\b|\bUTC\b/gi, " ")
     .replace(/\s+/g, " ")
     .trim();
-  const range = normalized.match(
-    /((?:mon|tue|wed|thu|fri|sat|sun)\w*,?\s+)?([A-Za-z]{3,9}\s+\d{1,2}(?:st|nd|rd|th)?(?:,\s*\d{4})?)\s+(\d{1,2}(?::\d{2})?\s?(?:am|pm))\s*(?:-|to)\s*(\d{1,2}(?::\d{2})?\s?(?:am|pm))/i
-  );
-  if (!range) {
+  if (!cleaned) {
     return null;
   }
 
-  const dayPrefix = range[1] || "";
-  const datePart = range[2];
-  const startPart = sanitizeTimeToken(range[3]);
-  const endPart = sanitizeTimeToken(range[4]);
+  const timeMatch = cleaned.match(OCR_TIME_RANGE_RE);
+  if (!timeMatch) {
+    return null;
+  }
+  const startPart = sanitizeTimeToken(timeMatch[1]);
+  const endPart = sanitizeTimeToken(timeMatch[2]);
+
+  /* Date can live on the time line (e.g. "Sat May 9 1pm-3pm") or on a
+   * preceding date-only line ("Saturday May 9, 2026" above
+   * "Artisan Kitchen 1PM - 3 PM"). Prefer in-line. */
+  let dateMatch = cleaned.match(OCR_DATE_PIECE_RE);
+  let dayPrefix = "";
+  let datePart = "";
+  if (dateMatch) {
+    dayPrefix = dateMatch[1] || "";
+    datePart = dateMatch[2];
+  } else if (optionalDatePrefix) {
+    const prefMatch = String(optionalDatePrefix).match(OCR_DATE_PIECE_RE);
+    if (prefMatch) {
+      dayPrefix = prefMatch[1] || "";
+      datePart = prefMatch[2];
+    }
+  }
+  if (!datePart) {
+    return null;
+  }
+
   const start = chrono.parseDate(`${dayPrefix}${datePart} ${startPart}`, ref);
   let end = chrono.parseDate(`${dayPrefix}${datePart} ${endPart}`, ref);
   if (!start || !end) {
@@ -356,10 +396,28 @@ function parseDateRangeLine(line, ref, optionalDatePrefix = "") {
     end = new Date(start.getTime() + OCR_DEFAULT_EVENT_DURATION_HOURS * 60 * 60 * 1000);
   }
 
+  /* Whatever sits on the time line that isn't date and isn't time is a
+   * plausible location ("Artisan Kitchen", "@ The Studio", etc.). */
+  let middle = cleaned;
+  if (dateMatch) middle = middle.replace(dateMatch[0], " ");
+  middle = middle.replace(timeMatch[0], " ");
+  middle = middle.replace(/\s+/g, " ").replace(/^[\s,;:.\-—|]+|[\s,;:.\-—|]+$/g, "").trim();
+  let location = "";
+  const lcMid = middle.toLowerCase();
+  if (
+    middle &&
+    middle.length >= 3 &&
+    /[aeiou]/i.test(middle) &&
+    !LOCATION_BLOCKLIST.has(lcMid)
+  ) {
+    location = toTitleCase(middle);
+  }
+
   return {
     start: start.toISOString(),
     end: end.toISOString(),
-    sourceText: normalized,
+    sourceText: cleaned,
+    location,
     allDay: false,
   };
 }
@@ -435,10 +493,20 @@ function isWeakOcrTitle(title) {
   return false;
 }
 
+const POSTER_KEYWORDS = /\b(experience|class|event|workshop|yoga|pilates|massage|bunny|therapy|wellness|paint|sip|party|tasting|concert|show|festival|brunch|dinner|lunch|breakfast|fundraiser|meetup|social|happy hour|game night|movie|screening|trivia|book club|run club|hike|tour)\b/i;
+const HEADER_SHAPE_RE = /^[A-Za-z][A-Za-z0-9\s&'.\-]+$/;
+
 function detectPosterHeading(lines) {
   const headerLines = [];
   for (let i = 0; i < Math.min(lines.length, 10); i += 1) {
-    const line = cleanOcrLine(lines[i]).replace(/\d+/g, "").trim();
+    /* IMPORTANT: check the *original* line for date-y content before we
+     * strip digits — once "Saturday May 9, 2026" loses its 9 it looks like
+     * a perfectly innocent heading. */
+    const original = cleanOcrLine(lines[i]);
+    if (!original) continue;
+    if (OCR_DATEY_LINE_RE.test(original)) continue;
+    if (OCR_TIME_RANGE_RE.test(original)) continue;
+    const line = original.replace(/\d+/g, "").trim();
     if (!line) continue;
     const lettersOnly = line.replace(/[^A-Za-z]/g, "");
     const vowelCount = (lettersOnly.match(/[aeiou]/gi) || []).length;
@@ -448,8 +516,12 @@ function detectPosterHeading(lines) {
     if (line.split(/\s+/).every((word) => word.length <= 2)) {
       continue;
     }
-    const hasKeyword = /\b(experience|class|event|workshop|yoga|pilates|massage|bunny|therapy|wellness)\b/i.test(line);
-    if ((/^[A-Z\s]{4,}$/.test(line.toUpperCase()) || hasKeyword) && line.split(/\s+/).length <= 4 && line.length >= 4) {
+    const hasKeyword = POSTER_KEYWORDS.test(line);
+    /* Looser "headery" shape: short, mostly letters with the kind of
+     * punctuation you'd see in event names (& ' - .). Still avoids picking
+     * up sentence-y body text by capping at 5 words. */
+    const headeryShape = HEADER_SHAPE_RE.test(line);
+    if ((headeryShape || hasKeyword) && line.split(/\s+/).length <= 5 && line.length >= 4) {
       headerLines.push(toTitleCase(line));
       if (headerLines.length === 2) break;
     }
@@ -498,8 +570,23 @@ function parseEventsFromOcrText(text, options = {}) {
     }
 
     const inferredTitle = inferTitleFromNearbyLines(lines, i);
-    const title = (inferredTitle === "Event" || isWeakOcrTitle(inferredTitle)) && posterHeading ? posterHeading : inferredTitle;
-    const location = findLocationLineNearby(lines, i);
+    /* Prefer the actual poster heading ("SEVENS / Paint & Sip") over a
+     * line of body copy that happened to match the inference heuristic
+     * ("EXPERIENCE DESIGNED FOR ALL SKILL LEVELS"). Fall back to the
+     * inference only when no heading was detected or when it'd be
+     * weaker than what we'd otherwise infer. */
+    let title;
+    if (posterHeading && !isWeakOcrTitle(posterHeading)) {
+      title = posterHeading;
+    } else if (inferredTitle && inferredTitle !== "Event") {
+      title = inferredTitle;
+    } else {
+      title = posterHeading || inferredTitle || "Event";
+    }
+    /* parsedRange.location captures "Artisan Kitchen" from "Artisan Kitchen 1PM - 3 PM";
+     * findLocationLineNearby finds explicit "Location: X" lines elsewhere on the flyer. */
+    const location =
+      parsedRange.location || findLocationLineNearby(lines, i);
     structured.push({
       title,
       location,
