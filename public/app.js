@@ -54,6 +54,11 @@ const shareCopyMsgBtn = $("shareCopyMsgBtn");
 const shareNativeBtn = $("shareNativeBtn");
 const closeShareModalBtn = $("closeShareModalBtn");
 const toastRoot = $("toastRoot");
+const pwaHint = $("pwaHint");
+const redisSessionBanner = $("redisSessionBanner");
+const cueNudgeWrap = $("cueNudgeWrap");
+const cueNudgeToggle = $("cueNudgeToggle");
+const cueNudgeLabel = $("cueNudgeLabel");
 const panelQuick = $("panelQuick");
 const panelGmail = $("panelGmail");
 const panelActivity = $("panelActivity");
@@ -91,8 +96,14 @@ let calViewYear = new Date().getFullYear();
 let calViewMonth = new Date().getMonth();
 let calSelectedDay = null;
 
-/** @type {{ authenticated: boolean, username?: string|null, email?: string|null, configured?: boolean, gmailConnected?: boolean }} */
-let sessionInfo = { authenticated: false };
+/** @type {{ authenticated: boolean, username?: string|null, email?: string|null, configured?: boolean, gmailConnected?: boolean, needsRedisForStableSessions?: boolean }} */
+let sessionInfo = { authenticated: false, needsRedisForStableSessions: false };
+
+const LS_NUDGES = "cueNudgesEnabled";
+const LS_NUDGE_FIRED = "cueNudgeFiredIds";
+/** Notify once per event when it enters this window (ms before start). */
+const NUDGE_WINDOW_MAX_MS = 50 * 60 * 1000;
+const NUDGE_WINDOW_MIN_MS = 45 * 1000;
 
 const TAB_KEY = "cueTab";
 
@@ -132,6 +143,7 @@ async function api(url, opts = {}) {
       username: null,
       email: null,
       configured: sessionInfo.configured,
+      needsRedisForStableSessions: sessionInfo.needsRedisForStableSessions,
     };
     updateSessionUI();
     throw new Error(
@@ -149,7 +161,16 @@ async function refreshSession() {
   const res = await fetch("/api/me", { credentials: "same-origin" });
   const data = await res.json().catch(() => ({}));
   if (res.status === 401 && data.code === "AUTH_INVALID") {
-    sessionInfo = { authenticated: false, gmailConnected: false, username: null, email: null };
+    sessionInfo = {
+      authenticated: false,
+      gmailConnected: false,
+      username: null,
+      email: null,
+      needsRedisForStableSessions:
+        typeof data.needsRedisForStableSessions === "boolean"
+          ? data.needsRedisForStableSessions
+          : sessionInfo.needsRedisForStableSessions,
+    };
     updateSessionUI();
     return sessionInfo;
   }
@@ -162,6 +183,7 @@ async function refreshSession() {
     email: data.email || null,
     configured: data.configured,
     gmailConnected: data.gmailConnected,
+    needsRedisForStableSessions: Boolean(data.needsRedisForStableSessions),
   };
   updateSessionUI();
   return sessionInfo;
@@ -197,6 +219,15 @@ function updateSessionUI() {
   if (panelQuick) panelQuick.classList.toggle("panel-stack--locked", !authed);
   if (panelActivity) panelActivity.classList.toggle("panel-stack--locked", !authed);
 
+  if (redisSessionBanner) {
+    redisSessionBanner.classList.toggle("hidden", !sessionInfo.needsRedisForStableSessions);
+  }
+  if (pwaHint) {
+    pwaHint.classList.toggle("hidden", authed);
+    pwaHint.setAttribute("aria-hidden", authed ? "true" : "false");
+  }
+  updateNudgeToggleUI();
+
   if (!sessionBar || !signOutBtn) return;
 
   if (authed) {
@@ -205,7 +236,8 @@ function updateSessionUI() {
     sessionBar.classList.remove("hidden");
     signOutBtn.classList.remove("hidden");
     openCueAuthBtn?.classList.add("hidden");
-    calendarNameInput?.classList.remove("hidden");
+    /* Calendar dropdown hidden in header for now — select stays in DOM for default save target. */
+    calendarNameInput?.classList.add("hidden");
   } else {
     sessionBar.textContent = "";
     sessionBar.classList.add("hidden");
@@ -220,7 +252,13 @@ function updateSessionUI() {
 
 async function signOut() {
   await fetch("/api/auth/logout", { method: "POST", credentials: "same-origin" });
-  sessionInfo = { authenticated: false, gmailConnected: false, username: null, email: null };
+  sessionInfo = {
+    authenticated: false,
+    gmailConnected: false,
+    username: null,
+    email: null,
+    needsRedisForStableSessions: sessionInfo.needsRedisForStableSessions,
+  };
   updateSessionUI();
   queueState = { suggestions: [], senderRules: { blocked: [], allowed: [] }, settings: {} };
   localEventsCache = [];
@@ -251,6 +289,218 @@ function showToast(msg, type = "info", ms = 3500) {
   toastRoot.appendChild(el);
   const t = setTimeout(() => el.remove(), ms);
   el.addEventListener("click", () => { clearTimeout(t); el.remove(); });
+}
+
+/* ── Browser “nudges” for upcoming events ─── */
+
+const NUDGE_FUN_TITLES = [
+  "Psst — your calendar has plans.",
+  "Incoming: future-you left a hint.",
+  "Something fun is almost on deck.",
+  "Clock says: almost go-time.",
+  "Gentle chaos-prevention ping.",
+  "Your schedule sends its regards.",
+  "Heads up — something’s about to bloom.",
+  "Tiny reminder, big plans attached.",
+];
+
+function nudgesGloballyEnabled() {
+  try {
+    return localStorage.getItem(LS_NUDGES) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function setNudgesEnabled(on) {
+  try {
+    if (on) localStorage.setItem(LS_NUDGES, "1");
+    else localStorage.removeItem(LS_NUDGES);
+  } catch {
+    /* ignore */
+  }
+  updateNudgeToggleUI();
+}
+
+function isAppleMobileDevice() {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent || "";
+  return (
+    /iPhone|iPod|iPad/.test(ua) ||
+    (navigator.platform === "MacIntel" && (navigator.maxTouchPoints || 0) > 1)
+  );
+}
+
+/** iOS / iPadOS only exposes reliable web notifications for “installed” web apps (Home Screen), not a normal Safari tab (iOS 16.4+). */
+function isStandaloneDisplayMode() {
+  try {
+    if (typeof navigator !== "undefined" && navigator.standalone === true) return true;
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return false;
+    if (window.matchMedia("(display-mode: standalone)").matches) return true;
+    if (window.matchMedia("(display-mode: fullscreen)").matches) return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+function nudgeUnavailableReason() {
+  if (typeof window !== "undefined" && window.isSecureContext === false) return "insecure";
+  if (typeof Notification === "undefined") return "no-api";
+  if (typeof Notification.requestPermission !== "function") return "no-api";
+  if (isAppleMobileDevice() && !isStandaloneDisplayMode()) return "ios-tab";
+  return null;
+}
+
+function eventNotificationsSupported() {
+  return nudgeUnavailableReason() === null;
+}
+
+let nudgeToggleSyncing = false;
+
+function updateNudgeToggleUI() {
+  if (!cueNudgeWrap || !cueNudgeToggle || !cueNudgeLabel) return;
+  if (!sessionInfo.authenticated) {
+    cueNudgeWrap.classList.add("hidden");
+    return;
+  }
+  cueNudgeWrap.classList.remove("hidden");
+
+  const reason = nudgeUnavailableReason();
+  const supported = reason === null;
+  const denied = supported && Notification.permission === "denied";
+  const unusable = !supported || denied;
+
+  cueNudgeWrap.classList.toggle("header-nudge--disabled", unusable);
+  cueNudgeToggle.disabled = unusable;
+
+  const unavailableTitle =
+    reason === "ios-tab"
+      ? "On iPhone/iPad, add Cue to your Home Screen (Share → Add to Home Screen), then open from that icon. Safari tabs can’t show reminders before events (iOS 16.4+)."
+      : reason === "insecure"
+        ? "Notifications need a secure (HTTPS) page."
+        : reason === "no-api"
+          ? "This browser or in-app web view doesn’t support notifications before events."
+          : "Notifications aren’t available here.";
+
+  cueNudgeLabel.title = !supported
+    ? unavailableTitle
+    : denied
+      ? "Notifications are blocked for this site — allow them in browser settings to get a heads-up before events start."
+      : "Send a browser notification shortly before an upcoming event in My Events starts (about an hour ahead).";
+
+  const on = supported && !denied && nudgesGloballyEnabled() && Notification.permission === "granted";
+  nudgeToggleSyncing = true;
+  cueNudgeToggle.checked = on;
+  nudgeToggleSyncing = false;
+}
+
+function pruneNudgeFired(events) {
+  let obj = {};
+  try {
+    obj = JSON.parse(localStorage.getItem(LS_NUDGE_FIRED) || "{}");
+  } catch {
+    return;
+  }
+  const now = Date.now();
+  const byId = new Map(events.map((e) => [e.id, e]));
+  for (const id of Object.keys(obj)) {
+    const ev = byId.get(id);
+    if (!ev || !ev.start || new Date(ev.start).getTime() <= now) {
+      delete obj[id];
+    }
+  }
+  try {
+    localStorage.setItem(LS_NUDGE_FIRED, JSON.stringify(obj));
+  } catch {
+    /* ignore */
+  }
+}
+
+function nudgeAlreadyFired(eventId) {
+  try {
+    const obj = JSON.parse(localStorage.getItem(LS_NUDGE_FIRED) || "{}");
+    return Boolean(obj[eventId]);
+  } catch {
+    return false;
+  }
+}
+
+function markNudgeFired(eventId) {
+  try {
+    const obj = JSON.parse(localStorage.getItem(LS_NUDGE_FIRED) || "{}");
+    obj[eventId] = Date.now();
+    localStorage.setItem(LS_NUDGE_FIRED, JSON.stringify(obj));
+  } catch {
+    /* ignore */
+  }
+}
+
+function buildDesktopNudge(ev) {
+  const startMs = new Date(ev.start).getTime();
+  const minutes = Math.max(1, Math.round((startMs - Date.now()) / 60000));
+  const when = new Date(ev.start).toLocaleString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  const title = NUDGE_FUN_TITLES[Math.floor(Math.random() * NUDGE_FUN_TITLES.length)];
+  const body = `${ev.title || "Event"}\n${when} · about ${minutes} min from now`;
+  return { title, body };
+}
+
+function scanUpcomingEventNudges() {
+  if (!sessionInfo.authenticated || !nudgesGloballyEnabled()) return;
+  if (!eventNotificationsSupported() || Notification.permission !== "granted") return;
+  pruneNudgeFired(localEventsCache);
+  const now = Date.now();
+  for (const ev of localEventsCache) {
+    if (!ev?.id || !ev?.start) continue;
+    const startMs = new Date(ev.start).getTime();
+    const delta = startMs - now;
+    if (delta < NUDGE_WINDOW_MIN_MS || delta > NUDGE_WINDOW_MAX_MS) continue;
+    if (nudgeAlreadyFired(ev.id)) continue;
+    try {
+      const { title, body } = buildDesktopNudge(ev);
+      new Notification(title, { body, tag: `cue-${ev.id}`, requireInteraction: false });
+      markNudgeFired(ev.id);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+async function onCueNudgeToggleChange() {
+  if (nudgeToggleSyncing) return;
+  if (!sessionInfo.authenticated || !cueNudgeToggle) return;
+  if (!eventNotificationsSupported()) return;
+
+  if (!cueNudgeToggle.checked) {
+    setNudgesEnabled(false);
+    showToast("Reminders before events are off.", "info");
+    scanUpcomingEventNudges();
+    return;
+  }
+
+  const perm = await Notification.requestPermission();
+  if (perm !== "granted") {
+    nudgeToggleSyncing = true;
+    cueNudgeToggle.checked = false;
+    nudgeToggleSyncing = false;
+    updateNudgeToggleUI();
+    showToast(
+      perm === "denied"
+        ? "Allow notifications in browser settings to get reminders before events."
+        : "Allow notifications to get a heads-up before events start.",
+      "error",
+    );
+    return;
+  }
+  setNudgesEnabled(true);
+  showToast("On — we’ll notify you shortly before upcoming events start.", "success");
+  scanUpcomingEventNudges();
 }
 
 /* ── Tabs ─────────────────────────────────── */
@@ -293,7 +543,6 @@ function calendarKeyPayload() {
 
 async function loadCalendars() {
   const data = await api("/api/calendars");
-  calendarNameInput.classList.remove("hidden");
   calendarNameInput.innerHTML = "";
   const addGroup = (label, fill) => {
     const og = document.createElement("optgroup");
@@ -380,16 +629,6 @@ function readConfirmRowTitle(row, fallbackTitle) {
   return t || fallbackTitle;
 }
 
-function readConfirmRowLocation(row) {
-  const input = row.querySelector(".confirm-location-input");
-  return (input?.value || "").trim();
-}
-
-/** Browser's current offset, ISO-style: minutes east of UTC. e.g. PDT = -420. */
-function currentTzOffsetMin() {
-  return -new Date().getTimezoneOffset();
-}
-
 /* ── Confirm modal ────────────────────────── */
 
 function showConfirmModal(events, source, options = {}) {
@@ -402,8 +641,8 @@ function showConfirmModal(events, source, options = {}) {
     confirmParseHint.classList.remove("hidden");
     confirmParseHint.textContent =
       source === "photo"
-        ? "Here is what we pulled from your image—edit the title, time, or location if needed, then confirm."
-        : "Check the title, time, and location, then confirm to add to your chosen calendar.";
+        ? "Here is what we pulled from your image—edit the title or time if needed, then confirm."
+        : "Check the title and time, then confirm to add to your chosen calendar.";
   }
 
   const isSingleEvent = events.length === 1;
@@ -423,16 +662,8 @@ function showConfirmModal(events, source, options = {}) {
     const timeEl = document.createElement("div");
     timeEl.className = "confirm-time";
     timeEl.textContent = formatDate(ev.start);
-    const locationInput = document.createElement("input");
-    locationInput.type = "text";
-    locationInput.className = "confirm-location-input";
-    locationInput.value = ev.location || "";
-    locationInput.placeholder = "Location (optional)";
-    locationInput.setAttribute("aria-label", "Event location");
-    locationInput.autocomplete = "off";
     info.appendChild(titleInput);
     info.appendChild(timeEl);
-    info.appendChild(locationInput);
 
     const actions = document.createElement("div");
     actions.className = "confirm-actions";
@@ -459,8 +690,7 @@ function showConfirmModal(events, source, options = {}) {
       this.disabled = true;
       try {
         const title = readConfirmRowTitle(row, ev.title);
-        const location = readConfirmRowLocation(row);
-        const evToSend = { ...ev, title, location };
+        const evToSend = { ...ev, title };
         const ok = await addEvent(evToSend, source, { photoId: attachedPhotoId });
         if (ok === false) { this.textContent = "Confirm"; this.disabled = false; return; }
         row.classList.add("added");
@@ -502,11 +732,7 @@ async function parseText() {
   parseTextBtn.textContent = "Reading…";
   parseTextBtn.disabled = true;
   try {
-    const data = await api("/api/parse/text", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text, tzOffsetMin: currentTzOffsetMin() }),
-    });
+    const data = await api("/api/parse/text", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
     if (data.events.length) showConfirmModal(data.events, "text");
     else showToast("No date or time in that text yet. Try something like “dinner Friday 7pm”.", "info");
   } catch (e) { showToast(e.message, "error"); }
@@ -602,7 +828,6 @@ async function parseImageFromFile(file) {
     const uploadFile = await downscaleImageForUpload(file);
     const fd = new FormData();
     fd.append("image", uploadFile, uploadFile.name || "photo.jpg");
-    fd.append("tzOffsetMin", String(currentTzOffsetMin()));
     let res;
     try {
       res = await fetchWithTimeout(
@@ -729,6 +954,7 @@ async function quickUpdateConfirmAction() {
 /* ── Gmail ────────────────────────────────── */
 
 async function connectGmail() {
+  if (connectGmailBtn?.disabled) return;
   if (!sessionInfo.authenticated) {
     showToast("Sign in to Cue first, then connect Google from here.", "error");
     return;
@@ -779,9 +1005,15 @@ async function submitCueAuth(registerMode) {
     await refreshSession();
     try {
       sessionStorage.setItem(TAB_KEY, "quick");
-      sessionStorage.setItem("cueSignedInFlash", registerMode ? "created" : "in");
     } catch {}
-    window.location.reload();
+    await loadLocalEvents().catch(() => {});
+    if (sessionInfo.authenticated) {
+      await loadCalendars().catch(() => {});
+      await loadGmailStatus().catch(() => {});
+      await loadReviewQueue().catch(() => {});
+    }
+    updateSessionUI();
+    showToast(registerMode ? "Account created. You’re signed in." : "Signed in.", "success");
   } catch (e) {
     if (cueAuthError) {
       cueAuthError.textContent = e.message || "Something went wrong.";
@@ -993,8 +1225,7 @@ function photoThumbHtml(pid) {
 function eventLineHtml(ev) {
   const label = sourceLabel(ev.source);
   const dest = { google: "Google Calendar", apple: "Apple Calendar", cue: "Cue" }[ev.destination] || "";
-  const loc = ev.location ? ` · ${escapeHtml(ev.location)}` : "";
-  return `<div class="event-group-line"><div class="event-title">${escapeHtml(ev.title)}${label ? ` <span class="source-tag">${label}</span>` : ""}</div><div class="event-meta">${formatDate(ev.start)}${loc}${dest ? ` · ${dest}` : ""}</div></div>`;
+  return `<div class="event-group-line"><div class="event-title">${escapeHtml(ev.title)}${label ? ` <span class="source-tag">${label}</span>` : ""}</div><div class="event-meta">${formatDate(ev.start)}${dest ? ` · ${dest}` : ""}</div></div>`;
 }
 
 function renderActivityList() {
@@ -1062,8 +1293,7 @@ function renderActivityList() {
     const dest = { google: "Google Calendar", apple: "Apple Calendar", cue: "Cue" }[ev.destination] || "";
     const showThumb = ev.source === "photo" && pid;
     const thumb = showThumb ? photoThumbHtml(pid) : "";
-    const loc = ev.location ? ` · ${escapeHtml(ev.location)}` : "";
-    row.innerHTML = `${thumb}<div class="event-info"><div class="event-title">${escapeHtml(ev.title)}${label ? ` <span class="source-tag">${label}</span>` : ""}</div><div class="event-meta">${formatDate(ev.start)}${loc}${dest ? ` · ${dest}` : ""}</div></div>`;
+    row.innerHTML = `${thumb}<div class="event-info"><div class="event-title">${escapeHtml(ev.title)}${label ? ` <span class="source-tag">${label}</span>` : ""}</div><div class="event-meta">${formatDate(ev.start)}${dest ? ` · ${dest}` : ""}</div></div>`;
     localEvents.appendChild(row);
   }
 }
@@ -1079,6 +1309,7 @@ async function loadLocalEvents() {
   localEventsCache = data.events || [];
   renderActivityList();
   renderMonthCalendar();
+  scanUpcomingEventNudges();
 }
 
 /* ── Month calendar ───────────────────────── */
@@ -1228,6 +1459,7 @@ function attachHandlers() {
   quickLockedSignInBtn?.addEventListener("click", () => openCueAuthModal());
   activityLockedSignInBtn?.addEventListener("click", () => openCueAuthModal());
   signOutBtn.addEventListener("click", () => signOut().catch((e) => showToast(e.message, "error")));
+  cueNudgeToggle?.addEventListener("change", () => onCueNudgeToggleChange().catch((e) => showToast(e.message, "error")));
   scanGmailBtn.addEventListener("click", () => scanNow());
   bulkApproveBtn.addEventListener("click", () => bulkApprove().catch((e) => showToast(e.message, "error")));
   strictDateTimeAdv.addEventListener("change", () => saveAdvRules().catch((e) => showToast(e.message, "error")));
@@ -1267,6 +1499,18 @@ function attachHandlers() {
   });
   eventPhotoLightboxClose?.addEventListener("click", closeEventPhotoLightbox);
   eventPhotoLightbox?.querySelector(".event-photo-lightbox-backdrop")?.addEventListener("click", closeEventPhotoLightbox);
+
+  const refreshNudgeForDisplayChange = () => {
+    try {
+      if (sessionInfo.authenticated) updateNudgeToggleUI();
+    } catch {
+      /* ignore */
+    }
+  };
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") refreshNudgeForDisplayChange();
+  });
+  window.addEventListener("pageshow", refreshNudgeForDisplayChange);
 }
 
 initTabs();
@@ -1292,13 +1536,6 @@ renderMonthCalendar();
     syncAdvancedFromQueue();
   }
   updateSessionUI();
-  try {
-    const flash = sessionStorage.getItem("cueSignedInFlash");
-    if (flash && sessionInfo.authenticated) {
-      sessionStorage.removeItem("cueSignedInFlash");
-      showToast(flash === "created" ? "Account created. You’re signed in." : "Signed in.", "success");
-    }
-  } catch {}
   /* Signed-out users see the hero + Jot scrim; they open Sign in from the header or overlay when ready. */
 })();
 
@@ -1307,4 +1544,8 @@ setInterval(() => {
   loadGmailStatus().catch(() => {});
   loadReviewQueue().catch(() => {});
 }, 20000);
+
+setInterval(() => {
+  scanUpcomingEventNudges();
+}, 40 * 1000);
 

@@ -3,12 +3,23 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#f5f3ee" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Cue" />
     <title>Cue</title>
     <link rel="icon" type="image/png" href="/daisy.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <div id="toastRoot" class="toast-container" aria-live="polite"></div>
+
+    <div id="redisSessionBanner" class="deploy-banner hidden" role="status">
+      <p class="deploy-banner-text">
+        <strong>Sign-in may drop on this host</strong> until you add <code>REDIS_URL</code> (Upstash Redis) in Vercel and redeploy — serverless instances do not share disk, so session files on <code>/tmp</code> vanish between requests.
+        <a href="https://upstash.com/docs/redis/overall/getstarted" target="_blank" rel="noopener noreferrer">Upstash quickstart</a>
+      </p>
+    </div>
 
     <div class="app">
       <header class="header">
@@ -18,6 +29,13 @@
           <button type="button" id="openCueAuthBtn" class="btn btn-outline btn-sm" aria-haspopup="dialog">Sign in</button>
           <button type="button" id="signOutBtn" class="btn-ghost btn-sm hidden" aria-label="Sign out">Sign out</button>
           <select id="calendarNameInput" class="select select-calendar hidden" aria-label="Where to save new events" title="Choose Apple, Google, or Cue-only storage"></select>
+          <div id="cueNudgeWrap" class="header-nudge hidden">
+            <label id="cueNudgeLabel" class="nudge-toggle" for="cueNudgeToggle">
+              <span class="nudge-toggle-text">Remind me</span>
+              <input type="checkbox" id="cueNudgeToggle" class="nudge-toggle-input" />
+              <span class="nudge-toggle-track" aria-hidden="true"></span>
+            </label>
+          </div>
         </div>
       </header>
 
@@ -29,11 +47,10 @@
         <p id="appHeroSub" class="app-hero-sub">
           <strong>Sign in</strong> to use the app. For Gmail or Google Calendar, open <strong>Inbox</strong> and connect Google.
         </p>
+        <p id="pwaHint" class="pwa-hint muted hidden" aria-hidden="true">
+          Tip: on your phone, use <strong>Add to Home Screen</strong> in the browser menu for quicker access to Cue.
+        </p>
       </div>
-
-      <p class="pwa-hint muted" aria-hidden="true">
-        Tip: on your phone, use <strong>Add to Home Screen</strong> in the browser menu for quicker access to Cue.
-      </p>
 
       <nav class="tabs" role="tablist" aria-label="Sections">
         <button class="tab active" data-tab="quick" id="tabBtnQuick" role="tab" aria-selected="true" aria-controls="panelQuick">Jot</button>
@@ -88,8 +105,8 @@
 
         <!-- ─── Inbox ─── -->
         <div id="panelGmail" class="panel hidden" role="tabpanel" aria-labelledby="tabBtnGmail" hidden>
-          <div class="section-header">
-            <span class="section-title">Inbox</span>
+          <p class="inbox-dev-notice" role="status">This section is still in development.</p>
+          <div class="section-header section-header--inbox-toolbar">
             <div class="actions inbox-toolbar-actions">
               <button id="scanGmailBtn" class="btn-outline hidden">Scan my inbox</button>
               <button id="bulkApproveBtn" class="btn-ghost hidden">Add all to calendar</button>
@@ -98,7 +115,16 @@
           <p class="muted inbox-lead">Connect Google to find events hiding in your emails.</p>
           <p id="inboxSignInHint" class="muted inbox-lead hidden">Sign in from the header.</p>
           <div id="inboxGoogleConnectRow" class="section inbox-google-connect hidden">
-            <button type="button" id="connectGmailBtn" class="btn btn-oauth">Connect Google</button>
+            <button
+              type="button"
+              id="connectGmailBtn"
+              class="btn btn-oauth"
+              disabled
+              aria-disabled="true"
+              title="Google connection is not available yet."
+            >
+              Connect Google
+            </button>
           </div>
           <p id="gmailStatusText" class="muted status-text hidden" aria-live="polite"></p>
           <div id="gmailCandidates"></div>

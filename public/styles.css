@@ -30,6 +30,39 @@ body {
 
 .hidden { display: none !important; }
 
+/* ── Deploy / hosting hints ─────────────── */
+
+.deploy-banner {
+  max-width: 620px;
+  margin: 0 auto;
+  padding: 12px 24px 0;
+}
+
+.deploy-banner-text {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  border-radius: var(--radius);
+  padding: 12px 14px;
+}
+
+.deploy-banner-text code {
+  font-family: var(--mono);
+  font-size: 12px;
+  background: rgba(255, 255, 255, 0.7);
+  padding: 1px 5px;
+  border-radius: 2px;
+}
+
+.deploy-banner-text a {
+  color: var(--text);
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 /* ── App shell ───────────────────────────── */
 
 .app {
@@ -42,29 +75,128 @@ body {
 
 .header {
   display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
   align-items: center;
   justify-content: space-between;
   padding: 24px 0 20px;
-  gap: 12px;
+  gap: 8px;
+  min-width: 0;
+}
+
+.logo {
+  flex-shrink: 0;
 }
 
 .header-actions {
   display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
   justify-content: flex-end;
+  gap: 6px;
   flex: 1;
   min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.header-actions::-webkit-scrollbar {
+  display: none;
+}
+
+/* Inline group: subtle divider before nudges (same row as calendar / auth) */
+.header-nudge {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  margin-left: 2px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
+}
+
+.header-nudge.header-nudge--disabled {
+  opacity: 0.42;
+  pointer-events: none;
+}
+
+.nudge-toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.nudge-toggle-text {
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+.nudge-toggle-input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  margin: 0;
+}
+
+.nudge-toggle-track {
+  width: 34px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--border);
+  position: relative;
+  transition: background var(--transition);
+  flex-shrink: 0;
+}
+
+.nudge-toggle-track::after {
+  content: "";
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  top: 2px;
+  left: 2px;
+  transition: transform var(--transition);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.nudge-toggle-input:focus-visible + .nudge-toggle-track {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.nudge-toggle-input:checked + .nudge-toggle-track {
+  background: var(--accent);
+}
+
+.nudge-toggle-input:checked + .nudge-toggle-track::after {
+  transform: translateX(14px);
+}
+
+.nudge-toggle-input:disabled + .nudge-toggle-track {
+  opacity: 0.7;
 }
 
 .session-bar {
   font-size: 12px;
-  max-width: 200px;
+  max-width: min(160px, 32vw);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text-secondary);
+  flex-shrink: 1;
+  min-width: 0;
 }
 
 .btn-oauth {
@@ -74,9 +206,18 @@ body {
   letter-spacing: 0.01em;
 }
 
+.btn-oauth:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+  filter: grayscale(0.35);
+  box-shadow: none;
+}
+
 .select-calendar {
-  min-width: 160px;
-  max-width: min(240px, 42vw);
+  min-width: 0;
+  width: auto;
+  max-width: min(200px, 36vw);
+  flex-shrink: 1;
 }
 
 /* ── Hero / tagline (first visit, app-style) ─ */
@@ -265,6 +406,22 @@ body {
   margin-bottom: 16px;
 }
 
+.section-header--inbox-toolbar {
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
+.inbox-dev-notice {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  margin: 0 0 14px;
+}
+
 .divider {
   border: none;
   border-top: 1px solid var(--border);
@@ -329,7 +486,7 @@ textarea { resize: vertical; min-height: 76px; }
 .inbox-google-connect .btn-oauth { width: 100%; max-width: 320px; }
 
 .panel-stack { position: relative; }
-/* Short band at top (~half viewport max); siblings dimmed + non-interactive while locked. */
+/* Siblings non-interactive while locked; overlay fills the whole panel. */
 .panel-stack--locked > *:not(.panel-locked-overlay) {
   pointer-events: none;
   user-select: none;
@@ -339,18 +496,16 @@ textarea { resize: vertical; min-height: 76px; }
   top: 0;
   left: 0;
   right: 0;
-  height: min(42vh, 260px);
-  min-height: 118px;
+  bottom: 0;
   z-index: 6;
   background: var(--bg-secondary);
   border: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
-  border-radius: var(--radius) var(--radius) 0 0;
+  border-radius: var(--radius);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 18px 16px;
+  padding: 24px 16px;
   box-sizing: border-box;
 }
 .panel-locked-title {
@@ -457,17 +612,17 @@ button {
   color: var(--text-secondary);
 }
 
-/* Mobile install tip (report P1) — same palette, no new fonts */
+/* Add-to-home tip: shown for signed-out users only (see updateSessionUI). */
 .pwa-hint {
-  display: none;
+  display: block;
   font-size: 12px;
   line-height: 1.45;
-  margin: -4px 0 16px;
+  margin: 12px 0 0;
   max-width: 36em;
 }
-.pwa-hint strong { font-weight: 600; color: var(--text); }
-@media (max-width: 520px) {
-  .pwa-hint { display: block; }
+.pwa-hint strong {
+  font-weight: 600;
+  color: var(--text);
 }
 
 .section-hint {
@@ -1167,16 +1322,62 @@ button {
   }
 
   .header {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 10px;
-    padding: 18px 0 16px;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 18px 0 14px;
   }
 
   .header-actions {
-    width: 100%;
-    justify-content: flex-start;
-    gap: 8px;
+    flex: 1;
+    min-width: 0;
+    justify-content: flex-end;
+    gap: 4px;
+    flex-wrap: nowrap;
+  }
+
+  .header .select-calendar {
+    width: auto;
+    min-width: 0;
+    max-width: min(160px, 46vw);
+    min-height: 40px;
+    font-size: 13px;
+    padding: 8px 28px 8px 10px;
+    flex-shrink: 1;
+  }
+
+  .nudge-toggle {
+    font-size: 10px;
+    gap: 5px;
+    letter-spacing: 0;
+  }
+
+  .nudge-toggle-track {
+    width: 32px;
+    height: 18px;
+  }
+
+  .nudge-toggle-track::after {
+    width: 14px;
+    height: 14px;
+  }
+
+  .nudge-toggle-input:checked + .nudge-toggle-track::after {
+    transform: translateX(13px);
+  }
+
+  .header .btn-sm.btn-outline,
+  .header .btn-sm.btn-ghost {
+    min-height: 40px;
+    padding: 8px 12px;
+    font-size: 13px;
+    box-sizing: border-box;
+  }
+
+  .header .btn-ghost.btn-sm {
+    padding: 8px 10px;
   }
 
   .logo {
@@ -1189,19 +1390,10 @@ button {
   }
 
   .session-bar {
-    font-size: 14px;
-    max-width: 100%;
-    flex: 1 1 auto;
+    font-size: 12px;
+    max-width: min(140px, 38vw);
+    flex: 0 1 auto;
     min-width: 0;
-  }
-
-  .select-calendar {
-    width: 100%;
-    max-width: 100%;
-    min-width: 0;
-    min-height: 48px;
-    font-size: 16px;
-    padding: 10px 32px 10px 12px;
   }
 
   .app-hero-kicker {
@@ -1218,6 +1410,7 @@ button {
 
   .tabs {
     gap: 22px;
+    margin-bottom: 20px;
   }
 
   .tab {
@@ -1268,6 +1461,13 @@ button {
     flex-direction: column;
     align-items: flex-start;
     gap: 10px;
+  }
+
+  .section-header--inbox-toolbar {
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-end;
+    width: 100%;
   }
 
   .inline-row {
@@ -1360,9 +1560,7 @@ button {
   }
 
   .panel-locked-overlay {
-    height: min(36vh, 240px);
-    min-height: 108px;
-    padding: 16px 14px;
+    padding: 20px 14px;
   }
 
   .status-text {
@@ -1685,24 +1883,6 @@ button {
   border-color: var(--text);
 }
 .confirm-time { font-size: 13px; color: var(--text-secondary); margin-top: 2px; }
-.confirm-location-input {
-  margin-top: 6px;
-  width: 100%;
-  font-size: 13px;
-  padding: 6px 8px;
-  border: 1px solid var(--border, #d8d6cf);
-  border-radius: 6px;
-  background: var(--bg, #fff);
-  color: var(--text, #1a1a1a);
-}
-.confirm-location-input:focus {
-  outline: none;
-  border-color: var(--text);
-}
-.confirm-location-input::placeholder {
-  color: var(--text-secondary);
-  opacity: 0.7;
-}
 .confirm-actions {
   display: flex;
   flex-direction: row;

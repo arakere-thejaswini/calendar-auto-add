@@ -10,3 +10,4 @@ data/events.json
 .env.*
 *.log
 .vercel
+.env*.local
