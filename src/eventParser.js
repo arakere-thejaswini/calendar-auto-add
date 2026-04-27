@@ -493,41 +493,116 @@ function isWeakOcrTitle(title) {
   return false;
 }
 
-const POSTER_KEYWORDS = /\b(experience|class|event|workshop|yoga|pilates|massage|bunny|therapy|wellness|paint|sip|party|tasting|concert|show|festival|brunch|dinner|lunch|breakfast|fundraiser|meetup|social|happy hour|game night|movie|screening|trivia|book club|run club|hike|tour)\b/i;
-const HEADER_SHAPE_RE = /^[A-Za-z][A-Za-z0-9\s&'.\-]+$/;
+/* ────────── Heading detection (no event-type whitelist) ──────────
+ *
+ * A poster heading is recognised by *shape and position*, not by whether
+ * it contains the words "yoga" or "paint". The signals we score:
+ *   - vertical position (headings sit at the top of a flyer)
+ *   - word count (1–5 words is heading-ish; longer is body copy)
+ *   - typography (ALL CAPS or Title Case after OCR)
+ *   - sentence-iness (commas in a list, sentence-style mid-line periods,
+ *     stop-word-only lines all push the score down)
+ *   - non-junk (must have letters and at least one vowel)
+ *
+ * Lines that are obviously dates, times, contact details, or pure body
+ * copy are filtered out before scoring.
+ */
+
+const HEADING_LETTER_RE = /[A-Za-z]/;
+const HEADING_VOWEL_RE = /[aeiou]/i;
+
+function lineLooksLikeBodyCopy(line) {
+  const words = line.split(/\s+/);
+  if (words.length > 6) return true;
+  /* Serial commas like "X, Y, Z" -> a list, not a heading. */
+  if (/,\s*[A-Za-z]+\s*,/.test(line) && words.length >= 4) return true;
+  /* Sentence-style "...word. Next word..." mid-line. */
+  if (/[a-z]\.\s+[A-Za-z]/.test(line)) return true;
+  return false;
+}
+
+function lineLooksLikeJunk(line) {
+  const letters = line.replace(/[^A-Za-z]/g, "");
+  if (letters.length < 3) return true;
+  if (!HEADING_VOWEL_RE.test(letters)) return true;
+  const nonAlphaNonSpace = line.replace(/[A-Za-z0-9\s]/g, "").length;
+  if (nonAlphaNonSpace > line.length * 0.4) return true;
+  return false;
+}
+
+function scoreHeadingCandidate(line, position) {
+  let score = 0;
+
+  /* Position: earlier on the poster is better. */
+  score += Math.max(0, 10 - position);
+
+  const words = line.split(/\s+/).filter(Boolean);
+  /* Word count: 2-4 words is the sweet spot for an event title. */
+  if (words.length === 1) score += 2;
+  else if (words.length === 2 || words.length === 3) score += 5;
+  else if (words.length === 4) score += 3;
+  else if (words.length === 5) score += 1;
+  else score -= words.length - 5;
+
+  /* Typography: ALL CAPS or proper Title Case is heading-ish. */
+  const upper = line.toUpperCase();
+  const lettersOnly = line.replace(/[^A-Za-z]/g, "");
+  const isAllCaps = lettersOnly.length >= 2 && line === upper;
+  const isTitleCase =
+    words.length > 0 &&
+    words.every((w) => w.length <= 3 || /^[A-Z]/.test(w));
+  if (isAllCaps) score += 3;
+  else if (isTitleCase) score += 4;
+
+  /* At least one "real" word (length >= 4) — keeps "AND OR" out. */
+  const longestWord = words.reduce((m, w) => Math.max(m, w.replace(/[^A-Za-z]/g, "").length), 0);
+  if (longestWord >= 4) score += 2;
+  else score -= 1;
+
+  /* Penalty for sentence-y endings. */
+  if (/[a-z]\.\s*$/.test(line)) score -= 2;
+  if (/[!?]/.test(line)) score -= 1;
+
+  return score;
+}
 
 function detectPosterHeading(lines) {
-  const headerLines = [];
+  if (!lines || !lines.length) return "";
+  const scored = [];
   for (let i = 0; i < Math.min(lines.length, 10); i += 1) {
-    /* IMPORTANT: check the *original* line for date-y content before we
-     * strip digits — once "Saturday May 9, 2026" loses its 9 it looks like
-     * a perfectly innocent heading. */
     const original = cleanOcrLine(lines[i]);
     if (!original) continue;
     if (OCR_DATEY_LINE_RE.test(original)) continue;
     if (OCR_TIME_RANGE_RE.test(original)) continue;
-    const line = original.replace(/\d+/g, "").trim();
-    if (!line) continue;
-    const lettersOnly = line.replace(/[^A-Za-z]/g, "");
-    const vowelCount = (lettersOnly.match(/[aeiou]/gi) || []).length;
-    if (lettersOnly.length < 4 || vowelCount < 1) {
-      continue;
-    }
-    if (line.split(/\s+/).every((word) => word.length <= 2)) {
-      continue;
-    }
-    const hasKeyword = POSTER_KEYWORDS.test(line);
-    /* Looser "headery" shape: short, mostly letters with the kind of
-     * punctuation you'd see in event names (& ' - .). Still avoids picking
-     * up sentence-y body text by capping at 5 words. */
-    const headeryShape = HEADER_SHAPE_RE.test(line);
-    if ((headeryShape || hasKeyword) && line.split(/\s+/).length <= 5 && line.length >= 4) {
-      headerLines.push(toTitleCase(line));
-      if (headerLines.length === 2) break;
-    }
+    if (lineLooksLikeBodyCopy(original)) continue;
+    if (lineLooksLikeJunk(original)) continue;
+    if (!HEADING_LETTER_RE.test(original)) continue;
+
+    const score = scoreHeadingCandidate(original, i);
+    /* Below ~10 the line probably wasn't a heading at all. */
+    if (score < 10) continue;
+    scored.push({ line: original, position: i, score });
   }
-  if (headerLines.length === 0) return "";
-  return normalizeTitleQuality(headerLines.join(" "));
+  if (!scored.length) return "";
+  scored.sort((a, b) => b.score - a.score || a.position - b.position);
+
+  /* Combine the top two only when they are *immediately adjacent* in the
+   * OCR (typical brand-line + event-name layout, e.g. "SEVENS" directly
+   * above "Paint & Sip"). Anything further apart is almost certainly a
+   * different field (location, body copy, etc.) and shouldn't get glued
+   * onto the title. */
+  const top = scored[0];
+  let combined = top.line;
+  const second = scored[1];
+  if (
+    second &&
+    second.score >= top.score - 3 &&
+    Math.abs(second.position - top.position) === 1
+  ) {
+    const ordered = [top, second].sort((a, b) => a.position - b.position);
+    combined = ordered.map((x) => x.line).join(" ");
+  }
+  return normalizeTitleQuality(toTitleCase(combined));
 }
 
 function findLocationLineNearby(lines, index) {
