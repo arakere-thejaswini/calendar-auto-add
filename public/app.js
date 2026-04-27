@@ -515,14 +515,83 @@ function setPhotoDropzoneBusy(busy) {
   }
 }
 
+/**
+ * Phone photos are routinely 4–12 MB, which (a) exceeds Vercel's 4.5 MB
+ * request body limit on serverless functions and (b) makes Tesseract slow
+ * enough to blow the function timeout. Downscale + JPEG-compress in the
+ * browser before upload — 2000 px on the long edge / quality 0.85 is plenty
+ * for OCR and keeps payloads well under 1 MB.
+ */
+const OCR_MAX_DIM = 2000;
+const OCR_JPEG_QUALITY = 0.85;
+const OCR_REQUEST_TIMEOUT_MS = 90 * 1000;
+
+async function downscaleImageForUpload(file) {
+  if (!file || typeof createImageBitmap !== "function") return file;
+  let bitmap;
+  try {
+    bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+  } catch {
+    return file;
+  }
+  const { width, height } = bitmap;
+  const longest = Math.max(width, height);
+  if (!longest) {
+    bitmap.close?.();
+    return file;
+  }
+  const scale = longest > OCR_MAX_DIM ? OCR_MAX_DIM / longest : 1;
+  const targetW = Math.max(1, Math.round(width * scale));
+  const targetH = Math.max(1, Math.round(height * scale));
+  let canvas;
+  if (typeof OffscreenCanvas === "function") {
+    canvas = new OffscreenCanvas(targetW, targetH);
+  } else {
+    canvas = document.createElement("canvas");
+    canvas.width = targetW;
+    canvas.height = targetH;
+  }
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(bitmap, 0, 0, targetW, targetH);
+  bitmap.close?.();
+  const blob = canvas.convertToBlob
+    ? await canvas.convertToBlob({ type: "image/jpeg", quality: OCR_JPEG_QUALITY })
+    : await new Promise((resolve) =>
+        canvas.toBlob((b) => resolve(b), "image/jpeg", OCR_JPEG_QUALITY),
+      );
+  if (!blob) return file;
+  if (blob.size >= file.size) return file;
+  const newName = (file.name || "photo").replace(/\.[^.]+$/, "") + ".jpg";
+  return new File([blob], newName, { type: "image/jpeg", lastModified: Date.now() });
+}
+
+function fetchWithTimeout(url, options, timeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
+}
+
 async function parseImageFromFile(file) {
   if (!assertSignedInOrOpenAuth()) return;
   if (!file || !file.type.startsWith("image/")) { showToast("Please use an image file.", "error"); return; }
-  const fd = new FormData();
-  fd.append("image", file);
   setPhotoDropzoneBusy(true);
   try {
-    const res = await fetch("/api/parse/image", { method: "POST", credentials: "same-origin", body: fd });
+    const uploadFile = await downscaleImageForUpload(file);
+    const fd = new FormData();
+    fd.append("image", uploadFile, uploadFile.name || "photo.jpg");
+    let res;
+    try {
+      res = await fetchWithTimeout(
+        "/api/parse/image",
+        { method: "POST", credentials: "same-origin", body: fd },
+        OCR_REQUEST_TIMEOUT_MS,
+      );
+    } catch (err) {
+      if (err?.name === "AbortError") {
+        throw new Error("Reading the image took too long. Try a smaller / sharper photo.");
+      }
+      throw err;
+    }
     const data = await res.json().catch(() => ({}));
     if (res.status === 401 && (data.code === "AUTH_REQUIRED" || data.code === "SIGN_IN_REQUIRED")) {
       sessionInfo = {
@@ -536,16 +605,25 @@ async function parseImageFromFile(file) {
       openCueAuthModal();
       throw new Error(data.error || "Sign in to Cue first.");
     }
+    if (res.status === 413) {
+      throw new Error("Image is too large to upload. Try a smaller photo.");
+    }
     if (!res.ok) throw new Error(data.error || "Failed");
     if (data.events.length) {
       let photoId = null;
       const upFd = new FormData();
-      upFd.append("image", file, file.name || "photo.jpg");
-      const upRes = await fetch("/api/event-photos", { method: "POST", credentials: "same-origin", body: upFd });
-      if (upRes.ok) {
-        const upData = await upRes.json().catch(() => ({}));
-        if (upData.photoId) photoId = upData.photoId;
-      }
+      upFd.append("image", uploadFile, uploadFile.name || "photo.jpg");
+      try {
+        const upRes = await fetchWithTimeout(
+          "/api/event-photos",
+          { method: "POST", credentials: "same-origin", body: upFd },
+          OCR_REQUEST_TIMEOUT_MS,
+        );
+        if (upRes.ok) {
+          const upData = await upRes.json().catch(() => ({}));
+          if (upData.photoId) photoId = upData.photoId;
+        }
+      } catch { /* photo persistence is best-effort */ }
       showConfirmModal(data.events, "photo", { photoId });
     } else showToast("No events found — try a clearer image.", "info");
   } catch (e) { showToast(e.message, "error"); }

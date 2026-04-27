@@ -525,6 +525,17 @@ app.post("/api/parse/text", async (req, res) => {
   }
 });
 
+/**
+ * Tesseract on Vercel: ship eng.traineddata in the function bundle (see
+ * vercel.json `includeFiles`) and point the worker at it, so we don't
+ * re-download ~5MB from a CDN on every cold start. Cache must be writable —
+ * /tmp on Vercel, a local folder otherwise.
+ */
+const TESS_LANG_PATH = __dirname;
+const TESS_CACHE_PATH = process.env.VERCEL
+  ? path.join("/tmp", "tesseract-cache")
+  : path.join(__dirname, ".tesseract-cache");
+
 app.post("/api/parse/image", upload.single("image"), async (req, res) => {
   if (!req.file) {
     res.status(400).json({ error: "Please upload an image." });
@@ -534,7 +545,12 @@ app.post("/api/parse/image", upload.single("image"), async (req, res) => {
   let worker;
   const preprocessedPath = path.join(uploadRoot, `${req.file.filename}-prep.png`);
   try {
-    worker = await createWorker("eng");
+    await fs.mkdir(TESS_CACHE_PATH, { recursive: true });
+    worker = await createWorker("eng", 1, {
+      langPath: TESS_LANG_PATH,
+      cachePath: TESS_CACHE_PATH,
+      gzip: false,
+    });
     await worker.setParameters({
       tessedit_pageseg_mode: "6",
       preserve_interword_spaces: "1",
