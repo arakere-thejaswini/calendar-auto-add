@@ -9,9 +9,9 @@ const { createClient: createRedisClient } = require("redis");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const multer = require("multer");
-const { createWorker } = require("tesseract.js");
 const sharp = require("sharp");
-const { parseEventsFromText, parseEventsFromOcrText } = require("./src/eventParser");
+const { parseEventsFromText, parseEventsFromOcrText, parseEventsFromOcrPage } = require("./src/eventParser");
+const { runOcrPasses } = require("./src/ocrPipeline");
 const { preloadSpellchecker, refineParsedEventsTitles, refineEventTitleSpelling } = require("./src/titleSpellfix");
 const {
   addEventToAppleCalendar,
@@ -543,13 +543,8 @@ app.post("/api/parse/text", async (req, res) => {
   }
 });
 
-/**
- * Tesseract on Vercel: ship eng.traineddata in the function bundle (see
- * vercel.json `includeFiles`) and point the worker at it, so we don't
- * re-download ~5MB from a CDN on every cold start. Cache must be writable —
- * /tmp on Vercel, a local folder otherwise.
- */
-const TESS_LANG_PATH = __dirname;
+/* Tesseract cache lives inside src/ocrPipeline.js now; we just make sure
+ * the writable cache dir exists once per cold start. */
 const TESS_CACHE_PATH = process.env.VERCEL
   ? path.join("/tmp", "tesseract-cache")
   : path.join(__dirname, ".tesseract-cache");
@@ -560,45 +555,24 @@ app.post("/api/parse/image", upload.single("image"), async (req, res) => {
     return;
   }
 
-  let worker;
-  const preprocessedPath = path.join(uploadRoot, `${req.file.filename}-prep.png`);
   try {
     await fs.mkdir(TESS_CACHE_PATH, { recursive: true });
-    worker = await createWorker("eng", 1, {
-      langPath: TESS_LANG_PATH,
-      cachePath: TESS_CACHE_PATH,
-      gzip: false,
-    });
-    await worker.setParameters({
-      tessedit_pageseg_mode: "6",
-      preserve_interword_spaces: "1",
-    });
-
-    await sharp(req.file.path)
-      .rotate()
-      .resize({ width: 2200, fit: "inside", withoutEnlargement: false })
-      .grayscale()
-      .normalize()
-      .sharpen()
-      .png()
-      .toFile(preprocessedPath);
-
-    const result = await worker.recognize(preprocessedPath);
-    const extractedText = result.data.text || "";
+    /* Multi-variant + multi-PSM OCR: src/ocrPipeline.js runs the image
+     * through several preprocessing recipes and page-segmentation modes,
+     * then keeps the result whose text + confidence look most like an
+     * actual event flyer. The chosen pass also returns line-level
+     * bounding boxes so we can pick the heading by font size. */
+    const ocr = await runOcrPasses(req.file.path);
     const events = await refineParsedEventsTitles(
-      parseEventsFromOcrText(extractedText, {
+      parseEventsFromOcrPage(ocr, {
         tzOffsetMin: readTzOffsetMin(req.body?.tzOffsetMin),
       }),
     );
-    res.json({ extractedText, events });
+    res.json({ extractedText: ocr.text, events, ocrMeta: ocr.meta });
   } catch (error) {
     res.status(500).json({ error: error.message });
   } finally {
-    if (worker) {
-      await worker.terminate();
-    }
     await fs.rm(req.file.path, { force: true });
-    await fs.rm(preprocessedPath, { force: true });
   }
 });
 

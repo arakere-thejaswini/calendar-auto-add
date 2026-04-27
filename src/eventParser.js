@@ -701,7 +701,143 @@ function dedupeAndNormalize(events) {
   return deduped;
 }
 
+/**
+ * Pick the visual heading off an OCR'd flyer using line-level font size.
+ *
+ * Tesseract returns each detected line with a bounding box; the box height
+ * is a strong proxy for "how big is this on the poster". We:
+ *   1. Filter out lines that are clearly date / time / junk / sentence body.
+ *   2. Find the median line height (= body copy size).
+ *   3. Anything significantly taller than the median, sitting above the
+ *      vertical midpoint of the image, is a heading candidate.
+ *   4. Pick the *largest* candidate as the title; if a second candidate is
+ *      almost as large and adjacent, glue them ("SEVENS" + "Paint & Sip").
+ *
+ * No keyword whitelist required — biggest readable text on the top half
+ * of the poster wins, regardless of what kind of event it is.
+ */
+function detectHeadingFromLines(lines) {
+  if (!lines || !lines.length) return "";
+
+  const cleaned = lines
+    .map((l) => ({ ...l, text: cleanOcrLine(l.text) }))
+    .filter((l) => l.text);
+
+  /* Heading candidates: skip dates, times, junk, body-copy-shaped lines. */
+  const candidates = cleaned.filter((l) => {
+    if (OCR_DATEY_LINE_RE.test(l.text)) return false;
+    if (OCR_TIME_RANGE_RE.test(l.text)) return false;
+    if (lineLooksLikeJunk(l.text)) return false;
+    if (lineLooksLikeBodyCopy(l.text)) return false;
+    if (l.text.split(/\s+/).length > 5) return false;
+    if (l.height < 8) return false; /* too small to be a heading */
+    return true;
+  });
+  if (!candidates.length) return "";
+
+  /* Body-text size = median line height across *all* readable lines. */
+  const heights = cleaned.map((l) => l.height).filter((h) => h > 0).sort((a, b) => a - b);
+  if (!heights.length) return "";
+  const medianHeight = heights[Math.floor(heights.length / 2)];
+
+  /* Image height ≈ max y1 across all lines. Headings sit on the top half. */
+  const imageBottom = Math.max(...cleaned.map((l) => l.y1 || 0)) || 1;
+  const topHalf = imageBottom * 0.55;
+
+  const ranked = candidates
+    .filter((l) => l.height >= medianHeight * 1.25 && l.y0 <= topHalf)
+    .sort((a, b) => b.height - a.height || a.y0 - b.y0);
+
+  if (!ranked.length) return "";
+
+  /* Glue the top two if they're both prominent and stacked (same y order,
+   * heights within 25%, vertically adjacent in the candidate list). */
+  const top = ranked[0];
+  const second = ranked[1];
+  let combined = top.text;
+  if (
+    second &&
+    second.height >= top.height * 0.75 &&
+    Math.abs(second.y0 - top.y0) < top.height * 3
+  ) {
+    const ordered = [top, second].sort((a, b) => a.y0 - b.y0);
+    combined = ordered.map((l) => l.text).join(" ");
+  }
+  return normalizeTitleQuality(toTitleCase(combined));
+}
+
+/**
+ * Same flow as parseEventsFromOcrText but takes the structured lines from
+ * the OCR pipeline so we can detect the heading by font size, not just
+ * shape. Falls back to the text-only path when no lines are provided.
+ */
+function parseEventsFromOcrPage(page, options = {}) {
+  if (!page || !Array.isArray(page.lines) || !page.lines.length) {
+    return parseEventsFromOcrText(page?.text || "", options);
+  }
+
+  const now = new Date();
+  const ref = buildChronoRef(now, options.tzOffsetMin);
+  const lines = page.lines
+    .map((l) => ({ ...l, text: cleanOcrLine(l.text) }))
+    .filter((l) => l.text);
+  if (!lines.length) return [];
+
+  const visualHeading = detectHeadingFromLines(page.lines);
+  /* Fall back to the shape-based heading detector if font sizes don't clearly
+   * separate (e.g. flat OCR confidence on a uniform-looking flyer). */
+  const fallbackHeading = detectPosterHeading(lines.map((l) => l.text));
+  const posterHeading = visualHeading || fallbackHeading;
+
+  const structured = [];
+  const lineTexts = lines.map((l) => l.text);
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const text = lines[i].text;
+    let parsedRange = parseDateRangeLine(text, ref);
+    if (!parsedRange) {
+      const dateOnly = extractDateOnlyFromLine(text);
+      if (dateOnly && i + 1 < lines.length) {
+        parsedRange = parseDateRangeLine(lines[i + 1].text, ref, dateOnly);
+      }
+    }
+    if (!parsedRange) continue;
+
+    const inferredTitle = inferTitleFromNearbyLines(lineTexts, i);
+    let title;
+    if (posterHeading && !isWeakOcrTitle(posterHeading)) {
+      title = posterHeading;
+    } else if (inferredTitle && inferredTitle !== "Event") {
+      title = inferredTitle;
+    } else {
+      title = posterHeading || inferredTitle || "Event";
+    }
+
+    const location =
+      parsedRange.location || findLocationLineNearby(lineTexts, i);
+
+    structured.push({
+      title,
+      location,
+      sourceText: parsedRange.sourceText,
+      start: parsedRange.start,
+      end: parsedRange.end,
+      allDay: false,
+    });
+  }
+
+  if (structured.length >= 1) {
+    return dedupeAndNormalize(structured).filter((event) => event.title !== "Event");
+  }
+
+  /* No date/time pairs found in the structured pass — fall back to
+   * text-only parsing so we still catch obvious cases. */
+  return parseEventsFromOcrText(page.text || lineTexts.join("\n"), options);
+}
+
 module.exports = {
   parseEventsFromText,
   parseEventsFromOcrText,
+  parseEventsFromOcrPage,
+  detectHeadingFromLines,
 };
