@@ -23,7 +23,12 @@ async function writeLocalEvents(userId, events) {
 async function saveLocalEvent(userId, event, meta = {}) {
   const events = await getLocalEvents(userId);
   const source = meta.source || event.source || "unknown";
-  const { source: _drop, photoId: _ignoreClientPhoto, ...eventFields } = event;
+  const {
+    source: _drop,
+    photoId: _ignoreClientPhotoId,
+    photoUrl: _ignoreClientPhotoUrl,
+    ...eventFields
+  } = event;
   const newEvent = {
     id: crypto.randomUUID(),
     ...eventFields,
@@ -34,6 +39,9 @@ async function saveLocalEvent(userId, event, meta = {}) {
   };
   if (meta.photoId && /^[a-f0-9]{32}$/.test(meta.photoId)) {
     newEvent.photoId = meta.photoId;
+  }
+  if (meta.photoUrl && typeof meta.photoUrl === "string" && /^https?:\/\//.test(meta.photoUrl)) {
+    newEvent.photoUrl = meta.photoUrl;
   }
 
   events.push(newEvent);

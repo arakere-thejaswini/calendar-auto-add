@@ -47,6 +47,7 @@ const {
   getStatus,
 } = require("./src/gmailService");
 const { listWritableGoogleCalendars, insertGoogleCalendarEvent } = require("./src/googleCalendarService");
+const { savePhotoBuffer, getLocalPhotoPath } = require("./src/photoStorage");
 
 const { ensureDataDir, dataDir } = require("./src/dataPaths");
 
@@ -426,13 +427,13 @@ function parseCalendarTarget(body) {
   return { type: "apple", name: key };
 }
 
-async function addEventToTarget(event, body, { source = "gmail", baseUrl, userId, ledgerIsGuest = false, photoId = null } = {}) {
+async function addEventToTarget(event, body, { source = "gmail", baseUrl, userId, ledgerIsGuest = false, photoId = null, photoUrl = null } = {}) {
   const target = parseCalendarTarget(body || {});
   let destination;
   let calendarRef = "";
 
   const saveCueOnly = async () => {
-    const saved = await saveLocalEvent(userId, event, { source, destination: "cue", calendarRef: "", photoId });
+    const saved = await saveLocalEvent(userId, event, { source, destination: "cue", calendarRef: "", photoId, photoUrl });
     return { destination: "cue", calendarRef: "", event: saved };
   };
 
@@ -464,7 +465,7 @@ async function addEventToTarget(event, body, { source = "gmail", baseUrl, userId
     throw err;
   }
 
-  const saved = await saveLocalEvent(userId, event, { source, destination, calendarRef, photoId });
+  const saved = await saveLocalEvent(userId, event, { source, destination, calendarRef, photoId, photoUrl });
   return { destination, calendarRef, event: saved };
 }
 
@@ -607,16 +608,14 @@ app.post("/api/event-photos", upload.single("image"), async (req, res) => {
     return;
   }
   const photoId = crypto.randomBytes(16).toString("hex");
-  const dir = path.join(userBaseDir(req.userId), "event-photos");
-  const outPath = path.join(dir, `${photoId}.webp`);
   try {
-    await fs.mkdir(dir, { recursive: true });
-    await sharp(req.file.path)
+    const buffer = await sharp(req.file.path)
       .rotate()
       .resize({ width: 1600, height: 1600, fit: "inside", withoutEnlargement: true })
       .webp({ quality: 85 })
-      .toFile(outPath);
-    res.json({ photoId });
+      .toBuffer();
+    const stored = await savePhotoBuffer(req.userId, photoId, buffer);
+    res.json(stored);
   } catch (error) {
     res.status(500).json({ error: error.message });
   } finally {
@@ -630,10 +629,11 @@ app.get("/api/event-photos/:photoId", async (req, res) => {
     res.status(400).json({ error: "Invalid image id." });
     return;
   }
-  const abs = path.resolve(path.join(userBaseDir(req.userId), "event-photos", `${id}.webp`));
-  try {
-    await fs.access(abs);
-  } catch {
+  const abs = await getLocalPhotoPath(req.userId, id);
+  if (!abs) {
+    /* Modern uploads use Vercel Blob and embed photoUrl directly on the
+     * event, so this endpoint is only hit by legacy events that stored
+     * photoId only. Returning 404 lets the UI fall back to a no-thumb row. */
     res.status(404).end();
     return;
   }
@@ -1113,10 +1113,22 @@ app.post("/api/events/add", async (req, res) => {
     let photoId = req.body.photoId;
     if (!photoId || !/^[a-f0-9]{32}$/.test(String(photoId))) {
       photoId = null;
-    } else {
-      try {
-        await fs.access(path.join(userBaseDir(req.userId), "event-photos", `${photoId}.webp`));
-      } catch {
+    }
+
+    /**
+     * photoUrl from Vercel Blob is the durable, primary reference. photoId
+     * stays for legacy/local-fallback events. We keep the photoId once Blob
+     * is in play too, so the GET /api/event-photos/:id endpoint still
+     * matches the URL pattern the UI uses for older events.
+     */
+    let photoUrl = typeof req.body.photoUrl === "string" ? req.body.photoUrl.trim() : "";
+    if (photoUrl && !/^https:\/\/[^\s]+\.public\.blob\.vercel-storage\.com\//.test(photoUrl)) {
+      photoUrl = "";
+    }
+
+    if (photoId && !photoUrl) {
+      const localAbs = await getLocalPhotoPath(req.userId, photoId);
+      if (!localAbs) {
         photoId = null;
       }
     }
@@ -1131,6 +1143,7 @@ app.post("/api/events/add", async (req, res) => {
       userId: req.userId,
       ledgerIsGuest: false,
       photoId: src === "photo" ? photoId : null,
+      photoUrl: src === "photo" ? photoUrl || null : null,
     });
     res.json({ success: true, destination: result.destination, event: result.event });
   } catch (error) {

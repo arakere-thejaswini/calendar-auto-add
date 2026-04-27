@@ -1883,6 +1883,24 @@ button {
   border-color: var(--text);
 }
 .confirm-time { font-size: 13px; color: var(--text-secondary); margin-top: 2px; }
+.confirm-location-input {
+  margin-top: 6px;
+  width: 100%;
+  font-size: 13px;
+  padding: 6px 8px;
+  border: 1px solid var(--border, #d8d6cf);
+  border-radius: 6px;
+  background: var(--bg, #fff);
+  color: var(--text, #1a1a1a);
+}
+.confirm-location-input:focus {
+  outline: none;
+  border-color: var(--text);
+}
+.confirm-location-input::placeholder {
+  color: var(--text-secondary);
+  opacity: 0.7;
+}
 .confirm-actions {
   display: flex;
   flex-direction: row;

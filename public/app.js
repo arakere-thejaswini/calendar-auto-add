@@ -608,6 +608,7 @@ async function addEvent(event, source, opts = {}) {
   }
   const payload = { event, ...calendarKeyPayload(), source };
   if (opts.photoId) payload.photoId = opts.photoId;
+  if (opts.photoUrl) payload.photoUrl = opts.photoUrl;
   const data = await api("/api/events/add", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -629,10 +630,21 @@ function readConfirmRowTitle(row, fallbackTitle) {
   return t || fallbackTitle;
 }
 
+function readConfirmRowLocation(row) {
+  const input = row.querySelector(".confirm-location-input");
+  return (input?.value || "").trim();
+}
+
+/** Browser's current offset, ISO-style: minutes east of UTC. e.g. PDT = -420. */
+function currentTzOffsetMin() {
+  return -new Date().getTimezoneOffset();
+}
+
 /* ── Confirm modal ────────────────────────── */
 
 function showConfirmModal(events, source, options = {}) {
   const attachedPhotoId = options.photoId || null;
+  const attachedPhotoUrl = options.photoUrl || null;
   confirmTitle.textContent = "Does this look right?";
   confirmEvents.innerHTML = "";
   let addedCount = 0;
@@ -641,8 +653,8 @@ function showConfirmModal(events, source, options = {}) {
     confirmParseHint.classList.remove("hidden");
     confirmParseHint.textContent =
       source === "photo"
-        ? "Here is what we pulled from your image—edit the title or time if needed, then confirm."
-        : "Check the title and time, then confirm to add to your chosen calendar.";
+        ? "Here is what we pulled from your image—edit the title, time, or location if needed, then confirm."
+        : "Check the title, time, and location, then confirm to add to your chosen calendar.";
   }
 
   const isSingleEvent = events.length === 1;
@@ -662,8 +674,16 @@ function showConfirmModal(events, source, options = {}) {
     const timeEl = document.createElement("div");
     timeEl.className = "confirm-time";
     timeEl.textContent = formatDate(ev.start);
+    const locationInput = document.createElement("input");
+    locationInput.type = "text";
+    locationInput.className = "confirm-location-input";
+    locationInput.value = ev.location || "";
+    locationInput.placeholder = "Location (optional)";
+    locationInput.setAttribute("aria-label", "Event location");
+    locationInput.autocomplete = "off";
     info.appendChild(titleInput);
     info.appendChild(timeEl);
+    info.appendChild(locationInput);
 
     const actions = document.createElement("div");
     actions.className = "confirm-actions";
@@ -690,8 +710,9 @@ function showConfirmModal(events, source, options = {}) {
       this.disabled = true;
       try {
         const title = readConfirmRowTitle(row, ev.title);
-        const evToSend = { ...ev, title };
-        const ok = await addEvent(evToSend, source, { photoId: attachedPhotoId });
+        const location = readConfirmRowLocation(row);
+        const evToSend = { ...ev, title, location };
+        const ok = await addEvent(evToSend, source, { photoId: attachedPhotoId, photoUrl: attachedPhotoUrl });
         if (ok === false) { this.textContent = "Confirm"; this.disabled = false; return; }
         row.classList.add("added");
         this.textContent = "✓ Added";
@@ -732,7 +753,11 @@ async function parseText() {
   parseTextBtn.textContent = "Reading…";
   parseTextBtn.disabled = true;
   try {
-    const data = await api("/api/parse/text", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
+    const data = await api("/api/parse/text", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, tzOffsetMin: currentTzOffsetMin() }),
+    });
     if (data.events.length) showConfirmModal(data.events, "text");
     else showToast("No date or time in that text yet. Try something like “dinner Friday 7pm”.", "info");
   } catch (e) { showToast(e.message, "error"); }
@@ -828,6 +853,7 @@ async function parseImageFromFile(file) {
     const uploadFile = await downscaleImageForUpload(file);
     const fd = new FormData();
     fd.append("image", uploadFile, uploadFile.name || "photo.jpg");
+    fd.append("tzOffsetMin", String(currentTzOffsetMin()));
     let res;
     try {
       res = await fetchWithTimeout(
@@ -860,6 +886,7 @@ async function parseImageFromFile(file) {
     if (!res.ok) throw new Error(data.error || "Failed");
     if (data.events.length) {
       let photoId = null;
+      let photoUrl = null;
       const upFd = new FormData();
       upFd.append("image", uploadFile, uploadFile.name || "photo.jpg");
       try {
@@ -871,9 +898,10 @@ async function parseImageFromFile(file) {
         if (upRes.ok) {
           const upData = await upRes.json().catch(() => ({}));
           if (upData.photoId) photoId = upData.photoId;
+          if (upData.photoUrl) photoUrl = upData.photoUrl;
         }
       } catch { /* photo persistence is best-effort */ }
-      showConfirmModal(data.events, "photo", { photoId });
+      showConfirmModal(data.events, "photo", { photoId, photoUrl });
     } else showToast("No events found — try a clearer image.", "info");
   } catch (e) { showToast(e.message, "error"); }
   finally { setPhotoDropzoneBusy(false); }
@@ -1216,16 +1244,31 @@ function sortEventsInPlace(list) {
   return list;
 }
 
-function photoThumbHtml(pid) {
-  const src = `/api/event-photos/${encodeURIComponent(pid)}`;
+/**
+ * Pick the best image URL for an event photo: a durable Vercel Blob URL for
+ * newer events, or the legacy server endpoint keyed by photoId for
+ * older / local-fallback events.
+ */
+function eventPhotoSrc(ev) {
+  if (ev?.photoUrl && /^https?:\/\//.test(ev.photoUrl)) return ev.photoUrl;
+  const pid = validEventPhotoId(ev);
+  return pid ? `/api/event-photos/${encodeURIComponent(pid)}` : "";
+}
+
+function photoThumbHtml(ev) {
+  const src = eventPhotoSrc(ev);
+  if (!src) return "";
+  const pid = validEventPhotoId(ev) || "";
+  const url = ev?.photoUrl || "";
   /* Photo as a div background (not <img>) avoids WebKit not painting images inside <button>. */
-  return `<button type="button" class="event-photo-thumb" data-photo-id="${escapeHtml(pid)}" aria-label="View source photo"><span class="event-photo-thumb-tilt"><span class="event-photo-thumb-stamp" aria-hidden="true"></span><span class="event-photo-thumb-photo" aria-hidden="true" style="background-image:url('${src}')"></span></span></button>`;
+  return `<button type="button" class="event-photo-thumb" data-photo-id="${escapeHtml(pid)}" data-photo-url="${escapeHtml(url)}" aria-label="View source photo"><span class="event-photo-thumb-tilt"><span class="event-photo-thumb-stamp" aria-hidden="true"></span><span class="event-photo-thumb-photo" aria-hidden="true" style="background-image:url('${src}')"></span></span></button>`;
 }
 
 function eventLineHtml(ev) {
   const label = sourceLabel(ev.source);
   const dest = { google: "Google Calendar", apple: "Apple Calendar", cue: "Cue" }[ev.destination] || "";
-  return `<div class="event-group-line"><div class="event-title">${escapeHtml(ev.title)}${label ? ` <span class="source-tag">${label}</span>` : ""}</div><div class="event-meta">${formatDate(ev.start)}${dest ? ` · ${dest}` : ""}</div></div>`;
+  const loc = ev.location ? ` · ${escapeHtml(ev.location)}` : "";
+  return `<div class="event-group-line"><div class="event-title">${escapeHtml(ev.title)}${label ? ` <span class="source-tag">${label}</span>` : ""}</div><div class="event-meta">${formatDate(ev.start)}${loc}${dest ? ` · ${dest}` : ""}</div></div>`;
 }
 
 function renderActivityList() {
@@ -1281,7 +1324,8 @@ function renderActivityList() {
       row.style.animationDelay = `${anim * 0.03}s`;
       anim += 1;
       const lines = group.map((e) => eventLineHtml(e)).join("");
-      row.innerHTML = `${photoThumbHtml(pid)}<div class="event-photo-group-stack">${lines}</div>`;
+      const groupHead = group[0];
+      row.innerHTML = `${photoThumbHtml(groupHead)}<div class="event-photo-group-stack">${lines}</div>`;
       localEvents.appendChild(row);
       continue;
     }
@@ -1291,9 +1335,10 @@ function renderActivityList() {
     anim += 1;
     const label = sourceLabel(ev.source);
     const dest = { google: "Google Calendar", apple: "Apple Calendar", cue: "Cue" }[ev.destination] || "";
-    const showThumb = ev.source === "photo" && pid;
-    const thumb = showThumb ? photoThumbHtml(pid) : "";
-    row.innerHTML = `${thumb}<div class="event-info"><div class="event-title">${escapeHtml(ev.title)}${label ? ` <span class="source-tag">${label}</span>` : ""}</div><div class="event-meta">${formatDate(ev.start)}${dest ? ` · ${dest}` : ""}</div></div>`;
+    const showThumb = ev.source === "photo" && eventPhotoSrc(ev);
+    const thumb = showThumb ? photoThumbHtml(ev) : "";
+    const loc = ev.location ? ` · ${escapeHtml(ev.location)}` : "";
+    row.innerHTML = `${thumb}<div class="event-info"><div class="event-title">${escapeHtml(ev.title)}${label ? ` <span class="source-tag">${label}</span>` : ""}</div><div class="event-meta">${formatDate(ev.start)}${loc}${dest ? ` · ${dest}` : ""}</div></div>`;
     localEvents.appendChild(row);
   }
 }
@@ -1481,9 +1526,9 @@ function attachHandlers() {
     else if (!shareModal.classList.contains("hidden")) closeShareModal();
   });
 
-  function openEventPhotoLightbox(photoId) {
-    if (!eventPhotoLightbox || !eventPhotoLightboxImg || !photoId) return;
-    eventPhotoLightboxImg.src = `/api/event-photos/${encodeURIComponent(photoId)}`;
+  function openEventPhotoLightbox(srcUrl) {
+    if (!eventPhotoLightbox || !eventPhotoLightboxImg || !srcUrl) return;
+    eventPhotoLightboxImg.src = srcUrl;
     eventPhotoLightbox.classList.remove("hidden");
   }
   function closeEventPhotoLightbox() {
@@ -1493,9 +1538,12 @@ function attachHandlers() {
   }
   localEvents.addEventListener("click", (e) => {
     const btn = e.target.closest(".event-photo-thumb");
-    if (!btn?.dataset?.photoId) return;
+    if (!btn) return;
+    /* photoUrl wins (durable Vercel Blob); falls back to /api/event-photos for legacy events. */
+    const url = btn.dataset.photoUrl || (btn.dataset.photoId ? `/api/event-photos/${encodeURIComponent(btn.dataset.photoId)}` : "");
+    if (!url) return;
     e.preventDefault();
-    openEventPhotoLightbox(btn.dataset.photoId);
+    openEventPhotoLightbox(url);
   });
   eventPhotoLightboxClose?.addEventListener("click", closeEventPhotoLightbox);
   eventPhotoLightbox?.querySelector(".event-photo-lightbox-backdrop")?.addEventListener("click", closeEventPhotoLightbox);
