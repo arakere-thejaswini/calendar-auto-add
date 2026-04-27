@@ -1,34 +1,57 @@
 Vercel deploy notes (plain text)
 
 Required env (Vercel → Project → Settings → Environment Variables):
-  SESSION_SECRET    long random string (app exits in production without it)
-  PUBLIC_BASE_URL   https://your-project.vercel.app  (Google OAuth redirect / origins)
-
-Strongly recommended on Vercel (fixes “logged out after a while”):
-  REDIS_URL         from Upstash (free tier): create a Redis database, copy the
-                    rediss://… URL, paste as REDIS_URL. Sessions then survive
-                    serverless cold starts. Without it, sessions live under /tmp
-                    and disappear when the function instance is recycled.
+  SESSION_SECRET       long random string (app exits in production without it)
+  PUBLIC_BASE_URL      https://your-project.vercel.app  (Google OAuth redirect / origins; must be https://)
+  ADMIN_SETUP_SECRET   long random string — required in production to call
+                         POST /api/gmail/config (header x-cue-admin-secret) to save
+                         Google OAuth client id/secret into the KV store.
+                         Without it, that endpoint returns 403 in production.
+  REDIS_URL            REQUIRED on Vercel. Without it, accounts, events, the
+                         Gmail review queue, and OAuth tokens are written to
+                         /tmp and are LOST on every cold start / redeploy. That
+                         is the cause of "account doesn't exist" after creating
+                         one and of vanishing events. Use Upstash Redis (free
+                         tier): create a Redis database, copy the rediss://...
+                         URL, paste as REDIS_URL. Sessions, accounts, and
+                         per-user data then survive serverless cold starts.
 
 Optional:
-  TRUST_PROXY       1  (not required; VERCEL is already detected for trust proxy + secure cookies)
+  TRUST_PROXY            1  (not required; VERCEL is already detected for trust proxy + secure cookies)
+  TOKEN_ENCRYPTION_KEY   base64, 32 raw bytes after decoding — encrypts OAuth token JSON at rest
+  API_RATE_LIMIT_MAX     number (default 300) — requests per IP per 15 min on gated API routes
 
-Writable paths when VERCEL is set and you have NOT set CUE_DATA_DIR:
-  App data (events, accounts, Gmail queue JSON, event photos): /tmp/cue-data
-  Multer temp OCR files:                                      /tmp/cue-uploads
-  Those trees are still EPHEMERAL on Vercel — REDIS_URL only fixes sessions, not
-  your saved events or uploads. For durable everything, use Fly (below) or plan
-  a database / blob migration.
+Google OAuth (one-time per deploy):
+  1) Google Cloud Console: Web client; enable Gmail API + Calendar API.
+  2) Authorized JavaScript origins:  https://YOUR_VERCEL_HOST
+  3) Authorized redirect URI:        https://YOUR_VERCEL_HOST/api/gmail/oauth/callback
+  4) POST /api/gmail/config with JSON { "clientId", "clientSecret", "redirectUri" } (redirectUri
+     can match step 3) and header x-cue-admin-secret: <ADMIN_SETUP_SECRET>.
+     With REDIS_URL set, the credentials are stored in Redis and survive cold
+     starts — you do NOT need to re-run this after each redeploy.
+
+Where data lives on Vercel (with REDIS_URL set):
+  cue:kv:accounts                         -> all Cue accounts (username/hash/id)
+  cue:kv:user:<userId>:events             -> that user's saved Events log
+  cue:kv:user:<userId>:review_queue       -> that user's Gmail suggestions/rules/settings
+  cue:kv:user:<userId>:gmail_tokens       -> that user's OAuth tokens (sealed if TOKEN_ENCRYPTION_KEY)
+  cue:kv:gmail:credentials                -> Google OAuth client (one per deployment)
+  cue:kv:gmail:oauth_state                -> short-lived PKCE OAuth state
+  cue:sess:<sid>                          -> Express session blobs
+
+Without REDIS_URL on Vercel, the same JSON falls back to /tmp/cue-data and is
+EPHEMERAL. The app logs a loud warning at boot when this is the case. Multer
+temp OCR uploads always go to /tmp/cue-uploads (fine — those are scratch).
 
 Overrides (advanced):
   CUE_DATA_DIR      absolute path to a writable directory (e.g. mounted volume)
   CUE_UPLOADS_DIR   absolute path for multer temp files
 
-Production with a real disk (recommended for Cue today):
+Production with a real disk (alternative to Vercel + Redis):
   Deploy with Docker + Fly.io using the included fly.toml: volume "oncue_data"
   is mounted at /data and CUE_DATA_DIR=/data so accounts, events, queue, photos,
-  and (without REDIS_URL) sessions all persist. App name there is on-cue; adjust
-  if you fork.
+  and (without REDIS_URL) sessions all persist on disk. App name there is
+  on-cue; adjust if you fork.
 
 Google Cloud Console: add your PUBLIC_BASE_URL host to OAuth redirect URIs and
 JavaScript origins.

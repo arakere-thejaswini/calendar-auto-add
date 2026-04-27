@@ -1,21 +1,23 @@
-const fs = require("node:fs/promises");
 const crypto = require("node:crypto");
-const { userEventsPath, ensureUserDir } = require("./userPaths");
+const { userEventsPath, ensureUserDir, assertValidUserId } = require("./userPaths");
+const { getJson, setJson } = require("./kvStore");
 
-async function ensureEventsFile(userId) {
-  await ensureUserDir(userId);
-  const p = userEventsPath(userId);
-  try {
-    await fs.access(p);
-  } catch {
-    await fs.writeFile(p, JSON.stringify([], null, 2), { encoding: "utf8", mode: 0o600 });
-  }
+function eventsKey(userId) {
+  return `user:${assertValidUserId(userId)}:events`;
 }
 
 async function getLocalEvents(userId) {
-  await ensureEventsFile(userId);
-  const raw = await fs.readFile(userEventsPath(userId), "utf8");
-  return JSON.parse(raw);
+  await ensureUserDir(userId);
+  const events = await getJson(eventsKey(userId), {
+    fileFallback: userEventsPath(userId),
+    defaultValue: [],
+  });
+  return Array.isArray(events) ? events : [];
+}
+
+async function writeLocalEvents(userId, events) {
+  await ensureUserDir(userId);
+  await setJson(eventsKey(userId), events, { fileFallback: userEventsPath(userId) });
 }
 
 async function saveLocalEvent(userId, event, meta = {}) {
@@ -35,7 +37,7 @@ async function saveLocalEvent(userId, event, meta = {}) {
   }
 
   events.push(newEvent);
-  await fs.writeFile(userEventsPath(userId), JSON.stringify(events, null, 2), { encoding: "utf8", mode: 0o600 });
+  await writeLocalEvents(userId, events);
   return newEvent;
 }
 
@@ -47,7 +49,7 @@ async function removeLastLocalEvent(userId) {
   const sorted = [...events].sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
   const removeId = sorted[0].id;
   const next = events.filter((e) => e.id !== removeId);
-  await fs.writeFile(userEventsPath(userId), JSON.stringify(next, null, 2), { encoding: "utf8", mode: 0o600 });
+  await writeLocalEvents(userId, next);
   return sorted[0];
 }
 
@@ -119,7 +121,7 @@ async function appendNoteToUpcomingLocalEvent(userId, { noteText, searchTerms, r
     };
   });
 
-  await fs.writeFile(userEventsPath(userId), JSON.stringify(updatedEvents, null, 2), { encoding: "utf8", mode: 0o600 });
+  await writeLocalEvents(userId, updatedEvents);
 
   return updatedEvents.find((event) => event.id === target.id);
 }

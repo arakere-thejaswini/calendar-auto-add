@@ -1,26 +1,25 @@
-const fs = require("node:fs/promises");
 const path = require("node:path");
 const crypto = require("node:crypto");
-const { dataDir, ensureDataDir } = require("./dataPaths");
+const { dataDir } = require("./dataPaths");
 const { ensureUserDir } = require("./userPaths");
+const { getJson, setJson } = require("./kvStore");
 
 const ACCOUNTS_PATH = path.join(dataDir, "cue_accounts.json");
+const ACCOUNTS_KEY = "accounts";
+const EMPTY_STORE = { users: {} };
 
 async function readStore() {
-  try {
-    const raw = await fs.readFile(ACCOUNTS_PATH, "utf8");
-    const j = JSON.parse(raw);
-    return j && typeof j === "object" && j.users && typeof j.users === "object" ? j : { users: {} };
-  } catch {
-    return { users: {} };
-  }
+  const j = await getJson(ACCOUNTS_KEY, {
+    fileFallback: ACCOUNTS_PATH,
+    defaultValue: EMPTY_STORE,
+  });
+  return j && typeof j === "object" && j.users && typeof j.users === "object"
+    ? j
+    : { users: {} };
 }
 
 async function writeStore(store) {
-  await ensureDataDir();
-  const tmp = `${ACCOUNTS_PATH}.${process.pid}.${Date.now()}.tmp`;
-  await fs.writeFile(tmp, JSON.stringify(store, null, 2), "utf8");
-  await fs.rename(tmp, ACCOUNTS_PATH);
+  await setJson(ACCOUNTS_KEY, store, { fileFallback: ACCOUNTS_PATH });
 }
 
 function normalizeUsername(name) {

@@ -73,6 +73,17 @@ if (process.env.NODE_ENV === "production" && !process.env.SESSION_SECRET) {
 const sessionSecret =
   process.env.SESSION_SECRET || "DEV_ONLY_UNSAFE_SESSION_SECRET_CHANGE_FOR_PRODUCTION";
 
+function needsRedisForStableSessionsHint() {
+  const redisUrl = process.env.REDIS_URL && String(process.env.REDIS_URL).trim();
+  return Boolean(process.env.VERCEL) && !redisUrl;
+}
+
+if (needsRedisForStableSessionsHint()) {
+  console.warn(
+    "[cue] WARNING: Running on Vercel without REDIS_URL. Accounts, events, the Gmail review queue, and OAuth tokens are written to /tmp and are LOST on every cold start / redeploy — this is why sign-in says \"account doesn't exist\" after creating one. Add Upstash Redis (rediss://...) as REDIS_URL in Vercel project settings to make data durable.",
+  );
+}
+
 const sessionCookieOptions = {
   httpOnly: true,
   secure: process.env.COOKIE_SECURE === "1" || Boolean(process.env.VERCEL),
@@ -291,7 +302,12 @@ app.get("/api/me", async (req, res) => {
       username = req.session.cueUsername || null;
     } catch {
       req.session.destroy(() => {});
-      res.status(401).json({ authenticated: false, error: "Invalid session.", code: "AUTH_INVALID" });
+      res.status(401).json({
+        authenticated: false,
+        error: "Invalid session.",
+        code: "AUTH_INVALID",
+        needsRedisForStableSessions: needsRedisForStableSessionsHint(),
+      });
       return;
     }
   } else if (req.session?.userId != null) {
@@ -304,7 +320,12 @@ app.get("/api/me", async (req, res) => {
       authenticated = true;
     } catch {
       req.session.destroy(() => {});
-      res.status(401).json({ authenticated: false, error: "Invalid session.", code: "AUTH_INVALID" });
+      res.status(401).json({
+        authenticated: false,
+        error: "Invalid session.",
+        code: "AUTH_INVALID",
+        needsRedisForStableSessions: needsRedisForStableSessionsHint(),
+      });
       return;
     }
   }
@@ -322,6 +343,8 @@ app.get("/api/me", async (req, res) => {
     email: email || undefined,
     configured: status.configured,
     gmailConnected: status.connected,
+    /** True on Vercel when sessions use /tmp file store — different instances lose sign-in until REDIS_URL is set. */
+    needsRedisForStableSessions: needsRedisForStableSessionsHint(),
   });
 });
 
@@ -334,6 +357,9 @@ app.post("/api/auth/register", cueAuthLimiter, async (req, res) => {
     });
     req.session.cueUserId = cueUserId;
     req.session.cueUsername = uname;
+    await new Promise((resolve, reject) => {
+      req.session.save((err) => (err ? reject(err) : resolve()));
+    });
     res.json({ success: true, username: uname });
   } catch (error) {
     res.status(400).json({ error: error.message || "Could not register." });
@@ -349,6 +375,9 @@ app.post("/api/auth/login", cueAuthLimiter, async (req, res) => {
     });
     req.session.cueUserId = cueUserId;
     req.session.cueUsername = uname;
+    await new Promise((resolve, reject) => {
+      req.session.save((err) => (err ? reject(err) : resolve()));
+    });
     res.json({ success: true, username: uname });
   } catch (error) {
     res.status(401).json({ error: error.message || "Could not sign in." });
@@ -701,6 +730,9 @@ app.get("/api/gmail/oauth/callback", async (req, res) => {
       req.session.userId = ledgerUserId;
       req.session.userEmail = email || "";
     }
+    await new Promise((resolve, reject) => {
+      req.session.save((err) => (err ? reject(err) : resolve()));
+    });
     refreshMonitorTimer(getBaseUrl(req)).catch(() => {});
     runQueueScan(getBaseUrl(req), ledgerUserId, 25).catch(() => {});
     res.send(`<!DOCTYPE html>

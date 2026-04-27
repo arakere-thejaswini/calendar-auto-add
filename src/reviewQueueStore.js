@@ -1,6 +1,6 @@
-const fs = require("node:fs/promises");
 const crypto = require("node:crypto");
-const { userQueuePath, ensureUserDir } = require("./userPaths");
+const { userQueuePath, ensureUserDir, assertValidUserId } = require("./userPaths");
+const { getJson, setJson } = require("./kvStore");
 
 const DEFAULT_DATA = {
   suggestions: [],
@@ -19,44 +19,38 @@ const DEFAULT_DATA = {
   },
 };
 
-async function ensureFile(userId) {
-  await ensureUserDir(userId);
-  const p = userQueuePath(userId);
-  try {
-    await fs.access(p);
-  } catch {
-    await fs.writeFile(p, JSON.stringify(DEFAULT_DATA, null, 2), { encoding: "utf8", mode: 0o600 });
-  }
+function queueKey(userId) {
+  return `user:${assertValidUserId(userId)}:review_queue`;
 }
 
 async function readQueueData(userId) {
-  await ensureFile(userId);
-  const p = userQueuePath(userId);
-  try {
-    const raw = await fs.readFile(p, "utf8");
-    const parsed = JSON.parse(raw);
-    return {
-      ...DEFAULT_DATA,
-      ...parsed,
-      senderRules: {
-        ...DEFAULT_DATA.senderRules,
-        ...(parsed.senderRules || {}),
-      },
-      settings: {
-        ...DEFAULT_DATA.settings,
-        ...(parsed.settings || {}),
-      },
-      suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions : [],
-      processedKeys: Array.isArray(parsed.processedKeys) ? parsed.processedKeys : [],
-    };
-  } catch {
+  await ensureUserDir(userId);
+  const parsed = await getJson(queueKey(userId), {
+    fileFallback: userQueuePath(userId),
+    defaultValue: null,
+  });
+  if (!parsed || typeof parsed !== "object") {
     return { ...DEFAULT_DATA };
   }
+  return {
+    ...DEFAULT_DATA,
+    ...parsed,
+    senderRules: {
+      ...DEFAULT_DATA.senderRules,
+      ...(parsed.senderRules || {}),
+    },
+    settings: {
+      ...DEFAULT_DATA.settings,
+      ...(parsed.settings || {}),
+    },
+    suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions : [],
+    processedKeys: Array.isArray(parsed.processedKeys) ? parsed.processedKeys : [],
+  };
 }
 
 async function writeQueueData(userId, data) {
   await ensureUserDir(userId);
-  await fs.writeFile(userQueuePath(userId), JSON.stringify(data, null, 2), { encoding: "utf8", mode: 0o600 });
+  await setJson(queueKey(userId), data, { fileFallback: userQueuePath(userId) });
 }
 
 function suggestionKey(suggestion) {

@@ -38,17 +38,21 @@ npm run dev
 
 ## Where data lives (persistence)
 
-| Path | What it stores |
-|------|----------------|
-| `data/gmail_credentials.json` | OAuth **client** id/secret (one per deployment; not end-user tokens). |
-| `data/gmail_oauth_state.json` | Short-lived PKCE OAuth state. |
-| `data/sessions/` | Express session files (session id only; no Gmail content). |
-| `data/cue_accounts.json` | Username → id + password hash (create parent `data/` first). |
-| `data/users/<userId>/gmail_tokens.json` | That user’s Gmail/Calendar OAuth tokens (optional encryption — see below). |
-| `data/users/<userId>/events.json` | That user’s saved Events log. |
-| `data/users/<userId>/review_queue.json` | That user’s Gmail suggestions, rules, polling settings. |
+The app reads/writes through a tiny KV layer (`src/kvStore.js`). When `REDIS_URL` is set (required on Vercel — see below) every JSON blob below lives in Redis under the listed key. On Fly with a mounted disk, or local dev, the same data is stored as files under `CUE_DATA_DIR` (default `./data`).
 
-Your **events** (and inbox queue, photos, etc.) live in those `data/users/<userId>/` files on **this server**. After you sign in from any browser or phone, the app loads that folder for your account—same data everywhere, as long as you use the same deployment and `CUE_DATA_DIR` points at the same disk (e.g. a persistent volume on Fly/Docker).
+| File path (disk fallback) | Redis key (when `REDIS_URL` is set) | What it stores |
+|---|---|---|
+| `data/cue_accounts.json` | `cue:kv:accounts` | Username → id + password hash. |
+| `data/gmail_credentials.json` | `cue:kv:gmail:credentials` | OAuth **client** id/secret (one per deployment; not end-user tokens). |
+| `data/gmail_oauth_state.json` | `cue:kv:gmail:oauth_state` | Short-lived PKCE OAuth state. |
+| `data/sessions/` | `cue:sess:<sid>` | Express session blobs (session id only; no Gmail content). |
+| `data/users/<userId>/gmail_tokens.json` | `cue:kv:user:<userId>:gmail_tokens` | That user’s Gmail/Calendar OAuth tokens (optional encryption — see below). |
+| `data/users/<userId>/events.json` | `cue:kv:user:<userId>:events` | That user’s saved Events log. |
+| `data/users/<userId>/review_queue.json` | `cue:kv:user:<userId>:review_queue` | That user’s Gmail suggestions, rules, polling settings. |
+
+Your **events** and inbox queue follow your account: after you sign in from any browser or phone, the app loads that user’s data from Redis (Vercel) or the same disk (Fly/Docker).
+
+> **Vercel users:** you **must** set `REDIS_URL` (Upstash works on the free tier). Without it, `/tmp` is the only writable path, and Vercel wipes `/tmp` on every cold start — meaning new accounts disappear and sign-in fails with “account doesn’t exist.” The app logs a loud warning at boot if it detects this misconfiguration. See `vercel-deploy-notes.txt`.
 
 **Hosted deploy:** see **[docs/DEPLOY.md](docs/DEPLOY.md)**. On Linux hosts, use **Google Calendar** only; Apple Calendar requires the server on a Mac.
 

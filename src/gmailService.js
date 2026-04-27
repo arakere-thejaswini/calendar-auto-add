@@ -1,11 +1,17 @@
-const fs = require("node:fs/promises");
 const crypto = require("node:crypto");
 const { google } = require("googleapis");
 const chrono = require("chrono-node");
 const { parseEventsFromText } = require("./eventParser");
-const { gmailCredentials: CREDENTIALS_PATH, gmailOAuthState: STATES_PATH, ensureDataDir } = require("./dataPaths");
-const { userTokensPath, ensureUserDir } = require("./userPaths");
+const { gmailCredentials: CREDENTIALS_PATH, gmailOAuthState: STATES_PATH } = require("./dataPaths");
+const { userTokensPath, ensureUserDir, assertValidUserId } = require("./userPaths");
 const { seal: sealTokenPayload, open: openTokenPayload } = require("./tokenCrypto");
+const kvStore = require("./kvStore");
+
+const CREDENTIALS_KEY = "gmail:credentials";
+const STATES_KEY = "gmail:oauth_state";
+function tokensKey(userId) {
+  return `user:${assertValidUserId(userId)}:gmail_tokens`;
+}
 
 const REDIRECT_PATH = "/api/gmail/oauth/callback";
 const DEFAULT_SCOPES = [
@@ -26,20 +32,6 @@ function buildPkcePair() {
   const codeVerifier = toBase64Url(crypto.randomBytes(64));
   const codeChallenge = toBase64Url(crypto.createHash("sha256").update(codeVerifier).digest());
   return { codeVerifier, codeChallenge };
-}
-
-async function readJson(pathName, fallback) {
-  try {
-    const raw = await fs.readFile(pathName, "utf8");
-    return JSON.parse(raw);
-  } catch {
-    return fallback;
-  }
-}
-
-async function writeJson(pathName, value) {
-  await ensureDataDir();
-  await fs.writeFile(pathName, JSON.stringify(value, null, 2), "utf8");
 }
 
 function decodeBase64Url(value) {
@@ -444,21 +436,25 @@ function buildImportantNotes({ from, subject, date, snippet, bodyText, messageUr
 }
 
 async function getCredentials() {
-  return readJson(CREDENTIALS_PATH, null);
+  return kvStore.getJson(CREDENTIALS_KEY, {
+    fileFallback: CREDENTIALS_PATH,
+    defaultValue: null,
+  });
 }
 
 async function saveCredentials(credentials) {
-  await writeJson(CREDENTIALS_PATH, credentials);
+  await kvStore.setJson(CREDENTIALS_KEY, credentials, { fileFallback: CREDENTIALS_PATH });
 }
 
 async function getTokens(userId) {
   await ensureUserDir(userId);
-  const p = userTokensPath(userId);
+  const raw = await kvStore.getString(tokensKey(userId), {
+    fileFallback: userTokensPath(userId),
+  });
+  if (!raw) {
+    return null;
+  }
   try {
-    const raw = (await fs.readFile(p, "utf8")).trim();
-    if (!raw) {
-      return null;
-    }
     const json = openTokenPayload(raw);
     return JSON.parse(json);
   } catch {
@@ -468,17 +464,21 @@ async function getTokens(userId) {
 
 async function saveTokens(userId, tokens) {
   await ensureUserDir(userId);
-  const p = userTokensPath(userId);
   const payload = sealTokenPayload(JSON.stringify(tokens));
-  await fs.writeFile(p, payload, { encoding: "utf8", mode: 0o600 });
+  await kvStore.setString(tokensKey(userId), payload, {
+    fileFallback: userTokensPath(userId),
+  });
 }
 
 async function getOAuthStates() {
-  return readJson(STATES_PATH, {});
+  return kvStore.getJson(STATES_KEY, {
+    fileFallback: STATES_PATH,
+    defaultValue: {},
+  });
 }
 
 async function saveOAuthStates(states) {
-  await writeJson(STATES_PATH, states);
+  await kvStore.setJson(STATES_KEY, states, { fileFallback: STATES_PATH });
 }
 
 function getRedirectUri(baseUrl, credentials) {
