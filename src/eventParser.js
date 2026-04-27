@@ -87,6 +87,78 @@ function formalizeGenericTitle(text) {
   return toTitleCase(cleaned);
 }
 
+/**
+ * Pull a trailing location out of a (post-time-stripped) title. Recognised
+ * forms, in order:
+ *   - "location: X", "venue: X", "place: X", "address: X"  (anywhere)
+ *   - "@ X"                                                (anywhere)
+ *   - "at X" or "in X"                                     (only at the end)
+ *
+ * "at"/"in" are intentionally conservative: we only treat them as location
+ * cues when they sit at the *end* of the remaining title (after chrono has
+ * removed the date/time), and the captured tail isn't a time-of-day word
+ * like "noon" or "the morning" or a duration like "30 minutes".
+ */
+const LOCATION_LABEL_RE = /\b(location|venue|place|address)\s*[:\-]\s*(.+?)\s*$/i;
+const LOCATION_AT_SIGN_RE = /(^|\s)@\s*([A-Za-z0-9][^@]+?)\s*$/;
+const LOCATION_TRAILING_RE = /\b(at|in)\s+(.+?)\s*$/i;
+const LOCATION_BLOCKLIST = new Set([
+  "noon", "midnight", "morning", "afternoon", "evening", "night", "midday",
+  "tonight", "today", "tomorrow", "yesterday", "person", "advance", "progress",
+  "the morning", "the afternoon", "the evening", "the night",
+]);
+const TIMEY_TAIL_RE = /\d|\b(am|pm|hour|hours|min|mins|minute|minutes|second|seconds)\b/i;
+
+function tidyLocation(raw) {
+  return (raw || "")
+    .replace(/[|_~`]+/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/^[\s,;:.-]+|[\s,;:.-]+$/g, "")
+    .trim();
+}
+
+function extractLocation(text) {
+  const original = String(text || "");
+  if (!original.trim()) {
+    return { remaining: "", location: "" };
+  }
+
+  let working = original;
+
+  const labelMatch = working.match(LOCATION_LABEL_RE);
+  if (labelMatch) {
+    const loc = tidyLocation(labelMatch[2]);
+    if (loc) {
+      working = working.slice(0, labelMatch.index).replace(/[\s,;:.-]+$/, "");
+      return { remaining: working.trim(), location: toTitleCase(loc) };
+    }
+  }
+
+  const atMatch = working.match(LOCATION_AT_SIGN_RE);
+  if (atMatch) {
+    /* "tomorrow @ Starbucks 10am" — peel a trailing time off the location */
+    const loc = tidyLocation(
+      atMatch[2].replace(/\s+\d{1,2}(?::\d{2})?\s*[ap]m\s*$/i, ""),
+    );
+    if (loc) {
+      working = working.slice(0, atMatch.index).replace(/[\s,;:.-]+$/, "");
+      return { remaining: working.trim(), location: toTitleCase(loc) };
+    }
+  }
+
+  const trailing = working.match(LOCATION_TRAILING_RE);
+  if (trailing) {
+    const loc = tidyLocation(trailing[2]);
+    const lcLoc = loc.toLowerCase();
+    if (loc && !LOCATION_BLOCKLIST.has(lcLoc) && !TIMEY_TAIL_RE.test(loc)) {
+      working = working.slice(0, trailing.index).replace(/[\s,;:.-]+$/, "");
+      return { remaining: working.trim(), location: toTitleCase(loc) };
+    }
+  }
+
+  return { remaining: original.trim(), location: "" };
+}
+
 function toPossessive(name) {
   if (name.endsWith("s")) {
     return `${name}'`;
@@ -94,26 +166,33 @@ function toPossessive(name) {
   return `${name}'s`;
 }
 
-function normalizeTitle(rawChunk, parsedText) {
+function normalizeTitleAndLocation(rawChunk, parsedText) {
   if (/\bbday\b|\bbirthday\b/i.test(rawChunk)) {
     const birthdayName = extractBirthdayName(rawChunk);
     if (birthdayName) {
-      return normalizeTitleQuality(`${toPossessive(birthdayName)} Birthday`);
+      return {
+        title: normalizeTitleQuality(`${toPossessive(birthdayName)} Birthday`),
+        location: "",
+      };
     }
   }
 
   const cleaned = rawChunk.replace(parsedText, "").replace(/\s+/g, " ").trim();
-  const withoutLeadingIs = cleaned.replace(/^is\s+/i, "").trim();
+  const { remaining, location } = extractLocation(cleaned);
+  const withoutLeadingIs = remaining.replace(/^is\s+/i, "").trim();
 
+  let title;
   if (withoutLeadingIs.length > 0) {
-    return normalizeTitleQuality(formalizeGenericTitle(withoutLeadingIs) || withoutLeadingIs);
+    title = normalizeTitleQuality(formalizeGenericTitle(withoutLeadingIs) || withoutLeadingIs);
+  } else if (remaining.length > 0) {
+    title = normalizeTitleQuality(formalizeGenericTitle(remaining) || remaining);
+  } else if (rawChunk.length > 0) {
+    title = normalizeTitleQuality(formalizeGenericTitle(rawChunk) || rawChunk);
+  } else {
+    title = "Event";
   }
 
-  if (cleaned.length > 0) {
-    return normalizeTitleQuality(formalizeGenericTitle(cleaned) || cleaned);
-  }
-
-  return rawChunk.length > 0 ? normalizeTitleQuality(formalizeGenericTitle(rawChunk) || rawChunk) : "Event";
+  return { title, location };
 }
 
 function looksAllDay(rawChunk) {
@@ -164,17 +243,32 @@ function normalizeParsedDate(date, result, now, sourceText) {
   return normalized;
 }
 
-function parseEventsFromText(text) {
+/**
+ * Build chrono's parsing reference. When `tzOffsetMin` is provided (minutes
+ * east of UTC, ISO-style — e.g. `-420` for PDT), chrono interprets bare
+ * times like "1pm" in that timezone instead of the server's local timezone.
+ * Without this, a UTC-running server (Vercel, Fly, etc.) would treat "1pm"
+ * as 1pm UTC and the user would see it shifted by their offset.
+ */
+function buildChronoRef(now, tzOffsetMin) {
+  if (typeof tzOffsetMin === "number" && Number.isFinite(tzOffsetMin)) {
+    return { instant: now, timezone: tzOffsetMin };
+  }
+  return now;
+}
+
+function parseEventsFromText(text, options = {}) {
   if (!text || !text.trim()) {
     return [];
   }
 
   const now = new Date();
+  const ref = buildChronoRef(now, options.tzOffsetMin);
   const chunks = splitIntoCandidateChunks(text);
   const events = [];
 
   for (const chunk of chunks) {
-    const results = chrono.parse(chunk, now);
+    const results = chrono.parse(chunk, ref);
     for (const result of results) {
       const allDay = looksAllDay(chunk);
       const startNormalized = normalizeParsedDate(result.start.date(), result, now, chunk);
@@ -184,9 +278,10 @@ function parseEventsFromText(text) {
         : new Date(start.getTime() + DEFAULT_EVENT_DURATION_HOURS * 60 * 60 * 1000);
       const finalStart = allDay ? startOfLocalDay(start) : start;
       const finalEnd = allDay ? nextLocalDay(start) : end;
-      const title = normalizeTitle(chunk, result.text);
+      const { title, location } = normalizeTitleAndLocation(chunk, result.text);
       events.push({
         title,
+        location,
         sourceText: chunk,
         start: finalStart.toISOString(),
         end: finalEnd.toISOString(),
@@ -235,7 +330,7 @@ function sanitizeTimeToken(token) {
   return `${hour}:${minutes}${suffix}`;
 }
 
-function parseDateRangeLine(line, now, optionalDatePrefix = "") {
+function parseDateRangeLine(line, ref, optionalDatePrefix = "") {
   const normalized = `${optionalDatePrefix} ${line}`
     .replace(/\bfrom\b/i, "")
     .replace(/\bPST\b|\bEST\b|\bCST\b|\bMST\b|\bUTC\b/gi, " ")
@@ -252,8 +347,8 @@ function parseDateRangeLine(line, now, optionalDatePrefix = "") {
   const datePart = range[2];
   const startPart = sanitizeTimeToken(range[3]);
   const endPart = sanitizeTimeToken(range[4]);
-  const start = chrono.parseDate(`${dayPrefix}${datePart} ${startPart}`, now);
-  let end = chrono.parseDate(`${dayPrefix}${datePart} ${endPart}`, now);
+  const start = chrono.parseDate(`${dayPrefix}${datePart} ${startPart}`, ref);
+  let end = chrono.parseDate(`${dayPrefix}${datePart} ${endPart}`, ref);
   if (!start || !end) {
     return null;
   }
@@ -363,12 +458,25 @@ function detectPosterHeading(lines) {
   return normalizeTitleQuality(headerLines.join(" "));
 }
 
-function parseEventsFromOcrText(text) {
+function findLocationLineNearby(lines, index) {
+  for (let i = 0; i < lines.length; i += 1) {
+    const ln = lines[i];
+    const m = ln.match(/^\s*(location|venue|address|place)\s*[:\-]\s*(.+)$/i);
+    if (m && Math.abs(i - index) <= 6) {
+      const loc = tidyLocation(m[2]);
+      if (loc) return toTitleCase(loc);
+    }
+  }
+  return "";
+}
+
+function parseEventsFromOcrText(text, options = {}) {
   if (!text || !text.trim()) {
     return [];
   }
 
   const now = new Date();
+  const ref = buildChronoRef(now, options.tzOffsetMin);
   const lines = correctOcrFlyerTypos(text)
     .split("\n")
     .map(cleanOcrLine)
@@ -378,11 +486,11 @@ function parseEventsFromOcrText(text) {
 
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
-    let parsedRange = parseDateRangeLine(line, now);
+    let parsedRange = parseDateRangeLine(line, ref);
     if (!parsedRange) {
       const dateOnly = extractDateOnlyFromLine(line);
       if (dateOnly && i + 1 < lines.length) {
-        parsedRange = parseDateRangeLine(lines[i + 1], now, dateOnly);
+        parsedRange = parseDateRangeLine(lines[i + 1], ref, dateOnly);
       }
     }
     if (!parsedRange) {
@@ -391,8 +499,10 @@ function parseEventsFromOcrText(text) {
 
     const inferredTitle = inferTitleFromNearbyLines(lines, i);
     const title = (inferredTitle === "Event" || isWeakOcrTitle(inferredTitle)) && posterHeading ? posterHeading : inferredTitle;
+    const location = findLocationLineNearby(lines, i);
     structured.push({
       title,
+      location,
       sourceText: parsedRange.sourceText,
       start: parsedRange.start,
       end: parsedRange.end,
@@ -405,7 +515,7 @@ function parseEventsFromOcrText(text) {
   }
 
   const fallbackText = lines.join("\n");
-  const fallback = parseEventsFromText(fallbackText).filter((event) =>
+  const fallback = parseEventsFromText(fallbackText, options).filter((event) =>
     /\d{1,2}:\d{2}|\b(am|pm)\b/i.test(event.sourceText || "")
   );
   return dedupeAndNormalize(fallback).filter((event) => event.title !== "Event");
@@ -418,8 +528,9 @@ function dedupeAndNormalize(events) {
     const event = {
       ...rawEvent,
       title: normalizeTitleQuality(formalizeGenericTitle(rawEvent.title || "") || rawEvent.title || "Event"),
+      location: rawEvent.location ? String(rawEvent.location).trim() : "",
     };
-    const key = `${event.title}|${event.start}|${event.end}`;
+    const key = `${event.title}|${event.start}|${event.end}|${event.location}`;
     if (!seen.has(key)) {
       seen.add(key);
       deduped.push(event);

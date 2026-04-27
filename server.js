@@ -515,10 +515,27 @@ async function refreshMonitorTimer(_baseUrl) {
   }
 }
 
+/**
+ * Why `tzOffsetMin`: chrono interprets bare times like "1pm" in the
+ * timezone of its parsing reference. On Vercel/Fly the server runs in UTC,
+ * so without a hint "1pm" becomes 1pm UTC and the user sees it shifted by
+ * their offset (e.g. 6 AM PT). The browser sends its current offset so the
+ * server parses in the user's timezone.
+ */
+function readTzOffsetMin(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return undefined;
+  /* Sanity-cap at +/-14h. */
+  if (n < -14 * 60 || n > 14 * 60) return undefined;
+  return n;
+}
+
 app.post("/api/parse/text", async (req, res) => {
   try {
-    const { text } = req.body;
-    const events = await refineParsedEventsTitles(parseEventsFromText(text || ""));
+    const { text, tzOffsetMin } = req.body || {};
+    const events = await refineParsedEventsTitles(
+      parseEventsFromText(text || "", { tzOffsetMin: readTzOffsetMin(tzOffsetMin) }),
+    );
     res.json({ events });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -567,7 +584,11 @@ app.post("/api/parse/image", upload.single("image"), async (req, res) => {
 
     const result = await worker.recognize(preprocessedPath);
     const extractedText = result.data.text || "";
-    const events = await refineParsedEventsTitles(parseEventsFromOcrText(extractedText));
+    const events = await refineParsedEventsTitles(
+      parseEventsFromOcrText(extractedText, {
+        tzOffsetMin: readTzOffsetMin(req.body?.tzOffsetMin),
+      }),
+    );
     res.json({ extractedText, events });
   } catch (error) {
     res.status(500).json({ error: error.message });

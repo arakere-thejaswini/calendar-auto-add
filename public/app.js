@@ -380,6 +380,16 @@ function readConfirmRowTitle(row, fallbackTitle) {
   return t || fallbackTitle;
 }
 
+function readConfirmRowLocation(row) {
+  const input = row.querySelector(".confirm-location-input");
+  return (input?.value || "").trim();
+}
+
+/** Browser's current offset, ISO-style: minutes east of UTC. e.g. PDT = -420. */
+function currentTzOffsetMin() {
+  return -new Date().getTimezoneOffset();
+}
+
 /* ── Confirm modal ────────────────────────── */
 
 function showConfirmModal(events, source, options = {}) {
@@ -392,8 +402,8 @@ function showConfirmModal(events, source, options = {}) {
     confirmParseHint.classList.remove("hidden");
     confirmParseHint.textContent =
       source === "photo"
-        ? "Here is what we pulled from your image—edit the title or time if needed, then confirm."
-        : "Check the title and time, then confirm to add to your chosen calendar.";
+        ? "Here is what we pulled from your image—edit the title, time, or location if needed, then confirm."
+        : "Check the title, time, and location, then confirm to add to your chosen calendar.";
   }
 
   const isSingleEvent = events.length === 1;
@@ -413,8 +423,16 @@ function showConfirmModal(events, source, options = {}) {
     const timeEl = document.createElement("div");
     timeEl.className = "confirm-time";
     timeEl.textContent = formatDate(ev.start);
+    const locationInput = document.createElement("input");
+    locationInput.type = "text";
+    locationInput.className = "confirm-location-input";
+    locationInput.value = ev.location || "";
+    locationInput.placeholder = "Location (optional)";
+    locationInput.setAttribute("aria-label", "Event location");
+    locationInput.autocomplete = "off";
     info.appendChild(titleInput);
     info.appendChild(timeEl);
+    info.appendChild(locationInput);
 
     const actions = document.createElement("div");
     actions.className = "confirm-actions";
@@ -441,7 +459,8 @@ function showConfirmModal(events, source, options = {}) {
       this.disabled = true;
       try {
         const title = readConfirmRowTitle(row, ev.title);
-        const evToSend = { ...ev, title };
+        const location = readConfirmRowLocation(row);
+        const evToSend = { ...ev, title, location };
         const ok = await addEvent(evToSend, source, { photoId: attachedPhotoId });
         if (ok === false) { this.textContent = "Confirm"; this.disabled = false; return; }
         row.classList.add("added");
@@ -483,7 +502,11 @@ async function parseText() {
   parseTextBtn.textContent = "Reading…";
   parseTextBtn.disabled = true;
   try {
-    const data = await api("/api/parse/text", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
+    const data = await api("/api/parse/text", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, tzOffsetMin: currentTzOffsetMin() }),
+    });
     if (data.events.length) showConfirmModal(data.events, "text");
     else showToast("No date or time in that text yet. Try something like “dinner Friday 7pm”.", "info");
   } catch (e) { showToast(e.message, "error"); }
@@ -579,6 +602,7 @@ async function parseImageFromFile(file) {
     const uploadFile = await downscaleImageForUpload(file);
     const fd = new FormData();
     fd.append("image", uploadFile, uploadFile.name || "photo.jpg");
+    fd.append("tzOffsetMin", String(currentTzOffsetMin()));
     let res;
     try {
       res = await fetchWithTimeout(
@@ -969,7 +993,8 @@ function photoThumbHtml(pid) {
 function eventLineHtml(ev) {
   const label = sourceLabel(ev.source);
   const dest = { google: "Google Calendar", apple: "Apple Calendar", cue: "Cue" }[ev.destination] || "";
-  return `<div class="event-group-line"><div class="event-title">${escapeHtml(ev.title)}${label ? ` <span class="source-tag">${label}</span>` : ""}</div><div class="event-meta">${formatDate(ev.start)}${dest ? ` · ${dest}` : ""}</div></div>`;
+  const loc = ev.location ? ` · ${escapeHtml(ev.location)}` : "";
+  return `<div class="event-group-line"><div class="event-title">${escapeHtml(ev.title)}${label ? ` <span class="source-tag">${label}</span>` : ""}</div><div class="event-meta">${formatDate(ev.start)}${loc}${dest ? ` · ${dest}` : ""}</div></div>`;
 }
 
 function renderActivityList() {
@@ -1037,7 +1062,8 @@ function renderActivityList() {
     const dest = { google: "Google Calendar", apple: "Apple Calendar", cue: "Cue" }[ev.destination] || "";
     const showThumb = ev.source === "photo" && pid;
     const thumb = showThumb ? photoThumbHtml(pid) : "";
-    row.innerHTML = `${thumb}<div class="event-info"><div class="event-title">${escapeHtml(ev.title)}${label ? ` <span class="source-tag">${label}</span>` : ""}</div><div class="event-meta">${formatDate(ev.start)}${dest ? ` · ${dest}` : ""}</div></div>`;
+    const loc = ev.location ? ` · ${escapeHtml(ev.location)}` : "";
+    row.innerHTML = `${thumb}<div class="event-info"><div class="event-title">${escapeHtml(ev.title)}${label ? ` <span class="source-tag">${label}</span>` : ""}</div><div class="event-meta">${formatDate(ev.start)}${loc}${dest ? ` · ${dest}` : ""}</div></div>`;
     localEvents.appendChild(row);
   }
 }

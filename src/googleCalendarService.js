@@ -22,6 +22,7 @@ function toGoogleEventBody(event) {
   const body = {
     summary: event.title || "Event",
     description: event.notes || undefined,
+    location: event.location || undefined,
   };
   if (event.url) {
     body.source = { url: event.url };

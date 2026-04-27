@@ -58,6 +58,7 @@ on run argv
   set isAllDay to item 5 of argv
   set eventNotes to item 6 of argv
   set eventUrl to item 7 of argv
+  set eventLocation to item 8 of argv
 
   set epochBase to date "Thursday, January 1, 1970 at 12:00:00 AM"
   set startDate to epochBase + startEpoch
@@ -77,6 +78,9 @@ on run argv
     if eventUrl is not "" then
       set eventProps to eventProps & {url:eventUrl}
     end if
+    if eventLocation is not "" then
+      set eventProps to eventProps & {location:eventLocation}
+    end if
 
     tell targetCalendar
       make new event with properties eventProps
@@ -95,6 +99,7 @@ end run
     String(Boolean(event.allDay)),
     event.notes || "",
     event.url || "",
+    event.location || "",
   ]);
 }
 
